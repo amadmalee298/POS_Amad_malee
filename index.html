@@ -1,0 +1,726 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>บัญชีส่วนตัว</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f3f0;
+  --surface: #fcfcfb;
+  --surface-2: #f0efec;
+  --border: #e2e0da;
+  --text: #0b0b0b;
+  --text-2: #52514e;
+  --text-3: #85847e;
+  --grid: #e6e4de;
+  --accent: #2a78d6;
+  --accent-ink: #ffffff;
+  --income: #2a78d6;   /* series 1 – blue */
+  --expense: #eb6834;  /* series 2 – orange */
+  --good: #0b7a3e;
+  --bad: #c42b2b;
+  --warn: #a66a00;
+  --shadow: 0 1px 2px rgba(0,0,0,.05), 0 2px 8px rgba(0,0,0,.04);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111110;
+    --surface: #1a1a19;
+    --surface-2: #242422;
+    --border: #2f2f2c;
+    --text: #ffffff;
+    --text-2: #c3c2b7;
+    --text-3: #8f8e86;
+    --grid: #2c2c29;
+    --accent: #3987e5;
+    --income: #3987e5;
+    --expense: #d95926;
+    --good: #4cc27f;
+    --bad: #f07272;
+    --warn: #e0a640;
+    --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111110;
+  --surface: #1a1a19;
+  --surface-2: #242422;
+  --border: #2f2f2c;
+  --text: #ffffff;
+  --text-2: #c3c2b7;
+  --text-3: #8f8e86;
+  --grid: #2c2c29;
+  --accent: #3987e5;
+  --income: #3987e5;
+  --expense: #d95926;
+  --good: #4cc27f;
+  --bad: #f07272;
+  --warn: #e0a640;
+  --shadow: none;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Noto Sans Thai", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ---------- layout ---------- */
+.wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 48px; }
+header.top {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px;
+  justify-content: space-between; margin-bottom: 18px;
+}
+.brand h1 { margin: 0; font-size: 22px; font-weight: 700; }
+.brand p { margin: 0; color: var(--text-2); font-size: 13px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px;
+}
+.card h2 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+.card .sub { margin: 0 0 14px; color: var(--text-2); font-size: 13px; }
+
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; margin-bottom: 12px; }
+.kpi .label { color: var(--text-2); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.kpi .value { font-size: 26px; font-weight: 700; margin-top: 2px; letter-spacing: -.01em; }
+.kpi .delta { font-size: 12.5px; color: var(--text-3); margin-top: 2px; }
+.dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+.grid-2 { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; margin-bottom: 12px; }
+.grid-main { display: grid; grid-template-columns: 360px 1fr; gap: 12px; align-items: start; }
+.grid-2 > *, .grid-main > *, .kpis > * { min-width: 0; }
+.chart-box { position: relative; height: 280px; }
+
+@media (max-width: 960px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .grid-2, .grid-main { grid-template-columns: 1fr; }
+}
+@media (max-width: 420px) {
+  .kpi .value { font-size: 21px; }
+}
+
+/* ---------- controls ---------- */
+.btn {
+  border: 1px solid var(--border); background: var(--surface); border-radius: 10px;
+  padding: 8px 14px; cursor: pointer; font-weight: 500; font-size: 14px;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+}
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.btn.primary:hover { filter: brightness(1.07); }
+.btn.ghost { background: transparent; }
+.btn.sm { padding: 4px 10px; font-size: 13px; }
+.btn.icon { padding: 6px 9px; }
+.btn:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+select, input[type=text], input[type=number], input[type=date], input[type=month], input[type=search] {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 8px 10px; width: 100%; min-width: 0;
+}
+label.f { display: block; font-size: 13px; color: var(--text-2); margin-bottom: 10px; }
+label.f > span { display: block; margin-bottom: 4px; }
+
+.seg { display: grid; grid-template-columns: 1fr 1fr; background: var(--surface-2); border-radius: 10px; padding: 3px; margin-bottom: 12px; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label { text-align: center; padding: 7px; border-radius: 8px; cursor: pointer; font-weight: 500; color: var(--text-2); }
+.seg input:checked + label { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.seg input:focus-visible + label { outline: 2px solid var(--accent); }
+.row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* ---------- budget ---------- */
+.meter { height: 10px; background: var(--surface-2); border-radius: 99px; overflow: hidden; margin: 8px 0 6px; }
+.meter > div { height: 100%; border-radius: 99px; background: var(--accent); transition: width .3s; }
+.meter.over > div { background: var(--bad); }
+.meter.near > div { background: var(--warn); }
+.budget-line { display: flex; justify-content: space-between; font-size: 13px; color: var(--text-2); gap: 8px; flex-wrap: wrap; }
+
+/* ---------- table ---------- */
+.tx-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.tx-filters { display: flex; gap: 8px; flex-wrap: wrap; }
+.tx-filters select, .tx-filters input { width: auto; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { font-weight: 500; color: var(--text-2); font-size: 13px; }
+td.amt, th.amt { text-align: right; }
+td.note { white-space: normal; color: var(--text-2); min-width: 120px; }
+.in { color: var(--good); }
+.out { color: var(--text); }
+.tag { display: inline-flex; align-items: center; gap: 6px; }
+.empty { text-align: center; color: var(--text-3); padding: 28px 8px; }
+.actions { display: flex; gap: 4px; justify-content: flex-end; }
+@media (max-width: 600px) {
+  th.note, td.note { display: none; }
+  th, td { padding: 9px 4px; }
+  .tx-filters, .tx-filters > * { flex: 1; }
+}
+
+.legend { display: flex; gap: 14px; font-size: 13px; color: var(--text-2); margin: -6px 0 10px; flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+.cat-list { list-style: none; margin: 0; padding: 0; }
+.cat-list li { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.cat-list li:last-child { border-bottom: 0; }
+.cat-list .bar { grid-column: 1 / -1; height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.cat-list .bar > div { height: 100%; background: var(--expense); border-radius: 99px; }
+.cat-list .pct { color: var(--text-3); font-size: 12.5px; margin-left: 6px; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
+  background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 10px;
+  opacity: 0; transition: .25s; pointer-events: none; font-size: 14px; z-index: 50;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.hidden { display: none !important; }
+.muted { color: var(--text-3); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <h1>บัญชีส่วนตัว</h1>
+      <p>บันทึกรายรับ–รายจ่าย และดูสรุปภาพรวมรายเดือน</p>
+    </div>
+    <div class="toolbar">
+      <input type="month" id="month" aria-label="เลือกเดือน" style="width:auto">
+      <button class="btn" id="btnExport" title="ส่งออก CSV">⬇ CSV</button>
+      <button class="btn" id="btnBackup" title="สำรองข้อมูล (JSON)">💾 สำรอง</button>
+      <button class="btn" id="btnRestore" title="กู้คืนข้อมูล (JSON)">📂 กู้คืน</button>
+      <input type="file" id="fileRestore" accept="application/json,.json" class="hidden">
+      <button class="btn icon" id="btnTheme" title="สลับธีม" aria-label="สลับธีม">🌓</button>
+    </div>
+  </header>
+
+  <!-- KPI tiles -->
+  <section class="kpis" aria-label="สรุปเดือนนี้">
+    <div class="card kpi">
+      <div class="label"><span class="dot" style="background:var(--income)"></span>รายรับ</div>
+      <div class="value num" id="kIncome">0</div>
+      <div class="delta" id="kIncomeD"></div>
+    </div>
+    <div class="card kpi">
+      <div class="label"><span class="dot" style="background:var(--expense)"></span>รายจ่าย</div>
+      <div class="value num" id="kExpense">0</div>
+      <div class="delta" id="kExpenseD"></div>
+    </div>
+    <div class="card kpi">
+      <div class="label">คงเหลือสุทธิ</div>
+      <div class="value num" id="kNet">0</div>
+      <div class="delta" id="kNetD"></div>
+    </div>
+    <div class="card kpi">
+      <div class="label">อัตราการออม</div>
+      <div class="value num" id="kRate">–</div>
+      <div class="delta" id="kRateD">ของรายรับเดือนนี้</div>
+    </div>
+  </section>
+
+  <!-- Charts -->
+  <section class="grid-2">
+    <div class="card">
+      <h2>รายรับ vs รายจ่าย</h2>
+      <p class="sub">ย้อนหลัง 6 เดือน (บาท)</p>
+      <div class="legend">
+        <span><span class="dot" style="background:var(--income)"></span>รายรับ</span>
+        <span><span class="dot" style="background:var(--expense)"></span>รายจ่าย</span>
+      </div>
+      <div class="chart-box"><canvas id="chartTrend" aria-label="กราฟแท่งรายรับและรายจ่ายย้อนหลัง 6 เดือน" role="img"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>รายจ่ายตามหมวดหมู่</h2>
+      <p class="sub" id="catSub">เดือนนี้</p>
+      <ul class="cat-list" id="catList"></ul>
+    </div>
+  </section>
+
+  <section class="grid-main">
+    <!-- Form + budget -->
+    <div style="display:grid; gap:12px">
+      <form class="card" id="txForm" autocomplete="off">
+        <h2 id="formTitle">เพิ่มรายการ</h2>
+        <p class="sub">กรอกข้อมูลแล้วกดบันทึก</p>
+        <div class="seg" role="radiogroup" aria-label="ประเภท">
+          <input type="radio" name="type" id="tExpense" value="expense" checked>
+          <label for="tExpense">รายจ่าย</label>
+          <input type="radio" name="type" id="tIncome" value="income">
+          <label for="tIncome">รายรับ</label>
+        </div>
+        <label class="f"><span>จำนวนเงิน (บาท)</span>
+          <input type="number" id="fAmount" min="0.01" step="0.01" inputmode="decimal" required placeholder="0.00">
+        </label>
+        <div class="row-2">
+          <label class="f"><span>หมวดหมู่</span>
+            <input type="text" id="fCategory" list="catOptions" required placeholder="เลือกหรือพิมพ์ใหม่">
+            <datalist id="catOptions"></datalist>
+          </label>
+          <label class="f"><span>วันที่</span>
+            <input type="date" id="fDate" required>
+          </label>
+        </div>
+        <label class="f"><span>บันทึกช่วยจำ</span>
+          <input type="text" id="fNote" maxlength="120" placeholder="(ไม่บังคับ)">
+        </label>
+        <div style="display:flex; gap:8px">
+          <button class="btn primary" type="submit" id="btnSave" style="flex:1; justify-content:center">บันทึก</button>
+          <button class="btn hidden" type="button" id="btnCancel">ยกเลิก</button>
+        </div>
+      </form>
+
+      <div class="card">
+        <h2>งบประมาณรายจ่ายต่อเดือน</h2>
+        <p class="sub">ตั้งเพดานรายจ่ายเพื่อติดตามการใช้เงิน</p>
+        <div style="display:flex; gap:8px">
+          <input type="number" id="budgetInput" min="0" step="100" placeholder="เช่น 15000" aria-label="งบประมาณต่อเดือน">
+          <button class="btn" id="btnBudget" type="button">ตั้งค่า</button>
+        </div>
+        <div id="budgetView" class="hidden">
+          <div class="meter" id="budgetMeter"><div></div></div>
+          <div class="budget-line"><span id="budgetUsed"></span><span id="budgetLeft"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Transactions -->
+    <div class="card">
+      <div class="tx-head">
+        <div>
+          <h2>รายการ</h2>
+          <p class="sub" style="margin:0" id="txCount"></p>
+        </div>
+        <div class="tx-filters">
+          <select id="filterType" aria-label="กรองประเภท">
+            <option value="all">ทั้งหมด</option>
+            <option value="income">รายรับ</option>
+            <option value="expense">รายจ่าย</option>
+          </select>
+          <input type="search" id="filterText" placeholder="ค้นหา…" aria-label="ค้นหา">
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>วันที่</th><th>หมวดหมู่</th><th class="note">บันทึก</th><th class="amt">จำนวนเงิน</th><th></th></tr></thead>
+          <tbody id="txBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const STORE_KEY = 'pfa.v1';
+  const DEFAULT_CATS = {
+    expense: ['อาหาร', 'เดินทาง', 'ที่พัก/ค่าเช่า', 'ค่าน้ำ-ไฟ', 'โทรศัพท์/อินเทอร์เน็ต', 'ช้อปปิ้ง', 'สุขภาพ', 'การศึกษา', 'บันเทิง', 'อื่นๆ'],
+    income: ['เงินเดือน', 'โบนัส', 'ธุรกิจ/ขายของ', 'ฟรีแลนซ์', 'ดอกเบี้ย/ปันผล', 'อื่นๆ'],
+  };
+  const TH_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+
+  const $ = (id) => document.getElementById(id);
+  const fmt = new Intl.NumberFormat('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmt0 = new Intl.NumberFormat('th-TH', { maximumFractionDigits: 0 });
+  const money = (n) => '฿' + fmt.format(n);
+  const pad = (n) => String(n).padStart(2, '0');
+  const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+  const monthKey = (iso) => iso.slice(0, 7);
+  const shiftMonth = (ym, delta) => {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+  };
+  const monthLabel = (ym, long) => {
+    const [y, m] = ym.split('-').map(Number);
+    return `${TH_MONTHS[m - 1]} ${long ? y + 543 : String(y + 543).slice(2)}`;
+  };
+  const thDate = (iso) => { const [y, m, d] = iso.split('-').map(Number); return `${d} ${TH_MONTHS[m - 1]} ${String(y + 543).slice(2)}`; };
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+  // ---------- storage ----------
+  let state = { transactions: [], budget: 0 };
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (Array.isArray(s.transactions)) state = { transactions: s.transactions, budget: Number(s.budget) || 0 };
+      }
+    } catch (e) { /* storage unavailable – run in memory */ }
+  }
+  function save() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
+  }
+
+  // ---------- theme ----------
+  function applyTheme(t) {
+    if (t) document.documentElement.setAttribute('data-theme', t);
+    else document.documentElement.removeAttribute('data-theme');
+  }
+  try { applyTheme(localStorage.getItem('pfa.theme')); } catch (e) {}
+  $('btnTheme').addEventListener('click', () => {
+    const dark = getComputedStyle(document.documentElement).colorScheme.includes('dark');
+    const next = dark ? 'light' : 'dark';
+    applyTheme(next);
+    try { localStorage.setItem('pfa.theme', next); } catch (e) {}
+    render();
+  });
+
+  // ---------- form ----------
+  let editingId = null;
+  const currentType = () => document.querySelector('input[name=type]:checked').value;
+
+  function fillCategoryOptions() {
+    const type = currentType();
+    const used = state.transactions.filter((t) => t.type === type).map((t) => t.category);
+    const all = [...new Set([...DEFAULT_CATS[type], ...used])];
+    $('catOptions').innerHTML = all.map((c) => `<option value="${esc(c)}">`).join('');
+  }
+  document.querySelectorAll('input[name=type]').forEach((r) => r.addEventListener('change', fillCategoryOptions));
+
+  function resetForm() {
+    editingId = null;
+    $('txForm').reset();
+    $('fDate').value = todayISO();
+    $('formTitle').textContent = 'เพิ่มรายการ';
+    $('btnSave').textContent = 'บันทึก';
+    $('btnCancel').classList.add('hidden');
+    fillCategoryOptions();
+  }
+
+  $('txForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const amount = Math.round(parseFloat($('fAmount').value) * 100) / 100;
+    const category = $('fCategory').value.trim();
+    const date = $('fDate').value;
+    if (!(amount > 0) || !category || !date) return;
+    const tx = { id: editingId || uid(), type: currentType(), amount, category, date, note: $('fNote').value.trim() };
+    if (editingId) {
+      state.transactions = state.transactions.map((t) => (t.id === editingId ? tx : t));
+      toast('แก้ไขรายการแล้ว');
+    } else {
+      state.transactions.push(tx);
+      toast('บันทึกรายการแล้ว');
+    }
+    save();
+    if (monthKey(date) !== $('month').value) $('month').value = monthKey(date);
+    resetForm();
+    render();
+  });
+  $('btnCancel').addEventListener('click', resetForm);
+
+  function startEdit(id) {
+    const t = state.transactions.find((x) => x.id === id);
+    if (!t) return;
+    editingId = id;
+    $(t.type === 'income' ? 'tIncome' : 'tExpense').checked = true;
+    fillCategoryOptions();
+    $('fAmount').value = t.amount;
+    $('fCategory').value = t.category;
+    $('fDate').value = t.date;
+    $('fNote').value = t.note || '';
+    $('formTitle').textContent = 'แก้ไขรายการ';
+    $('btnSave').textContent = 'บันทึกการแก้ไข';
+    $('btnCancel').classList.remove('hidden');
+    $('txForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('fAmount').focus({ preventScroll: true });
+  }
+
+  function remove(id) {
+    const t = state.transactions.find((x) => x.id === id);
+    if (!t || !confirm(`ลบรายการ "${t.category}" ${money(t.amount)} ?`)) return;
+    state.transactions = state.transactions.filter((x) => x.id !== id);
+    if (editingId === id) resetForm();
+    save();
+    render();
+    toast('ลบรายการแล้ว');
+  }
+
+  $('txBody').addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    if (btn.dataset.act === 'edit') startEdit(btn.dataset.id);
+    else remove(btn.dataset.id);
+  });
+
+  // ---------- budget ----------
+  $('btnBudget').addEventListener('click', () => {
+    const v = parseFloat($('budgetInput').value);
+    state.budget = v > 0 ? v : 0;
+    save();
+    render();
+    toast(state.budget ? 'ตั้งงบประมาณแล้ว' : 'ล้างงบประมาณแล้ว');
+  });
+
+  // ---------- filters ----------
+  $('month').addEventListener('change', render);
+  $('filterType').addEventListener('change', renderTable);
+  $('filterText').addEventListener('input', renderTable);
+
+  // ---------- summaries ----------
+  function sums(ym) {
+    let income = 0, expense = 0;
+    for (const t of state.transactions) {
+      if (monthKey(t.date) !== ym) continue;
+      if (t.type === 'income') income += t.amount; else expense += t.amount;
+    }
+    return { income, expense, net: income - expense };
+  }
+
+  function deltaText(cur, prev, goodWhenUp) {
+    if (!prev) return 'ไม่มีข้อมูลเดือนก่อน';
+    const pct = ((cur - prev) / Math.abs(prev)) * 100;
+    if (Math.abs(pct) < 0.05) return 'เท่ากับเดือนก่อน';
+    const up = pct > 0;
+    const good = goodWhenUp ? up : !up;
+    return `<span style="color:var(${good ? '--good' : '--bad'})">${up ? '▲' : '▼'} ${fmt0.format(Math.abs(pct))}%</span> จากเดือนก่อน`;
+  }
+
+  function renderKpis(ym) {
+    const s = sums(ym), p = sums(shiftMonth(ym, -1));
+    $('kIncome').textContent = money(s.income);
+    $('kExpense').textContent = money(s.expense);
+    $('kNet').textContent = (s.net < 0 ? '−' : '') + money(Math.abs(s.net));
+    $('kNet').style.color = s.net < 0 ? 'var(--bad)' : '';
+    $('kIncomeD').innerHTML = deltaText(s.income, p.income, true);
+    $('kExpenseD').innerHTML = deltaText(s.expense, p.expense, false);
+    $('kNetD').innerHTML = deltaText(s.net, p.net, true);
+    if (s.income > 0) {
+      const r = (s.net / s.income) * 100;
+      $('kRate').textContent = fmt0.format(r) + '%';
+      $('kRate').style.color = r < 0 ? 'var(--bad)' : '';
+      $('kRateD').textContent = r >= 20 ? 'ดีมาก — ออมได้ตามเป้า 20%+' : r >= 0 ? 'ของรายรับเดือนนี้' : 'ใช้จ่ายเกินรายรับ';
+    } else {
+      $('kRate').textContent = '–';
+      $('kRate').style.color = '';
+      $('kRateD').textContent = 'ยังไม่มีรายรับเดือนนี้';
+    }
+  }
+
+  function renderBudget(ym) {
+    $('budgetInput').value = state.budget || '';
+    const view = $('budgetView');
+    if (!state.budget) { view.classList.add('hidden'); return; }
+    view.classList.remove('hidden');
+    const used = sums(ym).expense;
+    const pct = (used / state.budget) * 100;
+    const meter = $('budgetMeter');
+    meter.firstElementChild.style.width = Math.min(pct, 100) + '%';
+    meter.classList.toggle('over', pct > 100);
+    meter.classList.toggle('near', pct >= 80 && pct <= 100);
+    $('budgetUsed').textContent = `ใช้ไป ${money(used)} (${fmt0.format(pct)}%)`;
+    const left = state.budget - used;
+    $('budgetLeft').innerHTML = left >= 0
+      ? `เหลือ ${money(left)}`
+      : `<span style="color:var(--bad)">⚠ เกินงบ ${money(-left)}</span>`;
+  }
+
+  function renderCategories(ym) {
+    const map = new Map();
+    let total = 0;
+    for (const t of state.transactions) {
+      if (t.type !== 'expense' || monthKey(t.date) !== ym) continue;
+      map.set(t.category, (map.get(t.category) || 0) + t.amount);
+      total += t.amount;
+    }
+    $('catSub').textContent = `${monthLabel(ym, true)} · รวม ${money(total)}`;
+    let rows = [...map.entries()].sort((a, b) => b[1] - a[1]);
+    if (!rows.length) {
+      $('catList').innerHTML = '<li class="empty" style="display:block">ยังไม่มีรายจ่ายในเดือนนี้</li>';
+      return;
+    }
+    if (rows.length > 7) {
+      const rest = rows.slice(6).reduce((a, r) => a + r[1], 0);
+      rows = [...rows.slice(0, 6), ['หมวดอื่นๆ รวม', rest]];
+    }
+    const max = rows[0][1];
+    $('catList').innerHTML = rows.map(([c, v]) => `
+      <li>
+        <span>${esc(c)}<span class="pct">${fmt0.format((v / total) * 100)}%</span></span>
+        <span class="num">${money(v)}</span>
+        <div class="bar"><div style="width:${(v / max) * 100}%"></div></div>
+      </li>`).join('');
+  }
+
+  // ---------- trend chart ----------
+  let chart = null;
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  function renderTrend(ym) {
+    const months = [];
+    for (let i = 5; i >= 0; i--) months.push(shiftMonth(ym, -i));
+    const data = months.map(sums);
+    const colors = {
+      income: cssVar('--income'), expense: cssVar('--expense'), surface: cssVar('--surface'),
+      grid: cssVar('--grid'), text2: cssVar('--text-2'), text: cssVar('--text'),
+    };
+    if (typeof Chart === 'undefined') return; // offline: charts unavailable, rest of app still works
+    const ds = (label, key, color) => ({
+      label, data: data.map((d) => d[key]), backgroundColor: color,
+      borderColor: colors.surface, borderWidth: { left: 1, right: 1 }, borderSkipped: 'bottom',
+      borderRadius: { topLeft: 4, topRight: 4 }, maxBarThickness: 28, categoryPercentage: 0.7, barPercentage: 0.92,
+    });
+    const cfg = {
+      type: 'bar',
+      data: {
+        labels: months.map((m) => monthLabel(m)),
+        datasets: [ds('รายรับ', 'income', colors.income), ds('รายจ่าย', 'expense', colors.expense)],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: { duration: 250 },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: colors.surface, titleColor: colors.text, bodyColor: colors.text2,
+            borderColor: colors.grid, borderWidth: 1, padding: 10, boxPadding: 4, usePointStyle: true,
+            titleFont: { family: 'Noto Sans Thai', weight: '600' }, bodyFont: { family: 'Noto Sans Thai' },
+            callbacks: {
+              title: (items) => monthLabel(months[items[0].dataIndex], true),
+              label: (c) => ` ${c.dataset.label}: ${money(c.parsed.y)}`,
+              footer: (items) => { const d = data[items[0].dataIndex]; return `คงเหลือ: ${d.net < 0 ? '−' : ''}${money(Math.abs(d.net))}`; },
+            },
+            footerColor: colors.text, footerFont: { family: 'Noto Sans Thai', weight: '600' },
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, border: { color: colors.grid }, ticks: { color: colors.text2, font: { family: 'Noto Sans Thai' } } },
+          y: {
+            beginAtZero: true, border: { display: false }, grid: { color: colors.grid },
+            ticks: {
+              color: colors.text2, maxTicksLimit: 5, font: { family: 'Noto Sans Thai' },
+              callback: (v) => (v >= 1000 ? fmt0.format(v / 1000) + 'k' : fmt0.format(v)),
+            },
+          },
+        },
+      },
+    };
+    if (chart) chart.destroy();
+    chart = new Chart($('chartTrend'), cfg);
+  }
+
+  // ---------- table ----------
+  function renderTable() {
+    const ym = $('month').value;
+    const type = $('filterType').value;
+    const q = $('filterText').value.trim().toLowerCase();
+    const list = state.transactions
+      .filter((t) => monthKey(t.date) === ym)
+      .filter((t) => type === 'all' || t.type === type)
+      .filter((t) => !q || t.category.toLowerCase().includes(q) || (t.note || '').toLowerCase().includes(q))
+      .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+    $('txCount').textContent = `${monthLabel(ym, true)} · ${list.length} รายการ`;
+    if (!list.length) {
+      $('txBody').innerHTML = `<tr><td colspan="5" class="empty">ยังไม่มีรายการ — เพิ่มรายการแรกได้จากฟอร์มด้านซ้าย</td></tr>`;
+      return;
+    }
+    $('txBody').innerHTML = list.map((t) => `
+      <tr>
+        <td class="num">${thDate(t.date)}</td>
+        <td><span class="tag"><span class="dot" style="background:var(--${t.type})"></span>${esc(t.category)}</span></td>
+        <td class="note">${esc(t.note || '')}</td>
+        <td class="amt num ${t.type === 'income' ? 'in' : 'out'}">${t.type === 'income' ? '+' : '−'}${money(t.amount)}</td>
+        <td><div class="actions">
+          <button class="btn ghost sm" data-act="edit" data-id="${t.id}" aria-label="แก้ไข">✏️</button>
+          <button class="btn ghost sm" data-act="del" data-id="${t.id}" aria-label="ลบ">🗑️</button>
+        </div></td>
+      </tr>`).join('');
+  }
+
+  function render() {
+    const ym = $('month').value;
+    renderKpis(ym);
+    renderBudget(ym);
+    renderCategories(ym);
+    renderTrend(ym);
+    renderTable();
+  }
+
+  // ---------- export / backup ----------
+  function download(name, content, type) {
+    const blob = new Blob([content], { type });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  }
+  $('btnExport').addEventListener('click', () => {
+    const q = (s) => `"${String(s).replace(/"/g, '""')}"`;
+    const rows = [['วันที่', 'ประเภท', 'หมวดหมู่', 'จำนวนเงิน', 'บันทึก']]
+      .concat([...state.transactions].sort((a, b) => a.date.localeCompare(b.date))
+        .map((t) => [t.date, t.type === 'income' ? 'รายรับ' : 'รายจ่าย', t.category, t.amount, t.note || '']));
+    download(`บัญชี-${todayISO()}.csv`, '﻿' + rows.map((r) => r.map(q).join(',')).join('\r\n'), 'text/csv;charset=utf-8');
+  });
+  $('btnBackup').addEventListener('click', () => {
+    download(`บัญชี-สำรอง-${todayISO()}.json`, JSON.stringify(state, null, 2), 'application/json');
+  });
+  $('btnRestore').addEventListener('click', () => $('fileRestore').click());
+  $('fileRestore').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!Array.isArray(data.transactions)) throw new Error('bad');
+      const valid = data.transactions.filter((t) =>
+        t && (t.type === 'income' || t.type === 'expense') && Number(t.amount) > 0 &&
+        typeof t.category === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(t.date));
+      if (!confirm(`กู้คืน ${valid.length} รายการ? ข้อมูลปัจจุบันจะถูกแทนที่`)) return;
+      state = {
+        transactions: valid.map((t) => ({ id: String(t.id || uid()), type: t.type, amount: Number(t.amount), category: t.category, date: t.date, note: String(t.note || '') })),
+        budget: Number(data.budget) || 0,
+      };
+      save();
+      resetForm();
+      render();
+      toast('กู้คืนข้อมูลแล้ว');
+    } catch (err) {
+      alert('ไฟล์ไม่ถูกต้อง');
+    }
+  });
+
+  let toastTimer;
+  function toast(msg) {
+    const el = $('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 1800);
+  }
+
+  // re-render chart colours when OS theme flips
+  try {
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => render());
+  } catch (e) {}
+
+  // ---------- init ----------
+  load();
+  $('month').value = monthKey(todayISO());
+  resetForm();
+  render();
+})();
+</script>
+</body>
+</html>
