@@ -252,6 +252,7 @@ export async function getTransactions(userId: string, f: TransactionFilters = {}
     date: t.date,
     description: t.description,
     note: t.note,
+    source: t.source,
     account: t.account,
     toAccount: t.toAccount,
     category: t.category,

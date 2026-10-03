@@ -38,6 +38,7 @@ export function TransactionItem({ t, showDate }: { t: TransactionRow; showDate?:
         <span className="block truncate text-xs text-muted-foreground">
           {showDate && <>{formatDate(t.date)} · </>}
           {txSubtitle(t)}
+          {t.source === "TELEGRAM" && <> · ผ่าน Telegram</>}
         </span>
       </span>
       <span

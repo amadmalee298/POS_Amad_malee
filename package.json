@@ -11,7 +11,9 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "prisma db seed",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "telegram:setup": "tsx scripts/telegram-setup.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",

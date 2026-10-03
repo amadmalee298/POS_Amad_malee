@@ -28,6 +28,11 @@ enum TransactionType {
   TRANSFER
 }
 
+enum TransactionSource {
+  WEB
+  TELEGRAM
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String
@@ -36,11 +41,13 @@ model User {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  accounts     Account[]
-  categories   Category[]
-  transactions Transaction[]
-  budgets      Budget[]
-  goals        Goal[]
+  accounts      Account[]
+  categories    Category[]
+  transactions  Transaction[]
+  budgets       Budget[]
+  goals         Goal[]
+  telegram      TelegramLink?
+  telegramCodes TelegramLinkCode[]
 
   @@map("users")
 }
@@ -57,9 +64,10 @@ model Account {
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
 
-  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions      Transaction[] @relation("TransactionAccount")
-  incomingTransfers Transaction[] @relation("TransactionToAccount")
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions      Transaction[]  @relation("TransactionAccount")
+  incomingTransfers Transaction[]  @relation("TransactionToAccount")
+  telegramDefaults  TelegramLink[]
 
   @@index([userId])
   @@map("accounts")
@@ -86,18 +94,19 @@ model Category {
 /// หัวใจของระบบ: ทุกการเคลื่อนไหวของเงิน
 /// INCOME/EXPENSE ใช้ accountId + categoryId, TRANSFER ใช้ accountId (ต้นทาง) + toAccountId (ปลายทาง)
 model Transaction {
-  id          String          @id @default(cuid())
-  userId      String          @map("user_id")
-  accountId   String          @map("account_id")
-  toAccountId String?         @map("to_account_id")
-  categoryId  String?         @map("category_id")
+  id          String            @id @default(cuid())
+  userId      String            @map("user_id")
+  accountId   String            @map("account_id")
+  toAccountId String?           @map("to_account_id")
+  categoryId  String?           @map("category_id")
   type        TransactionType
-  amount      Decimal         @db.Decimal(14, 2)
-  date        DateTime        @db.Date
-  description String          @default("")
+  amount      Decimal           @db.Decimal(14, 2)
+  date        DateTime          @db.Date
+  description String            @default("")
   note        String?
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @updatedAt @map("updated_at")
+  source      TransactionSource @default(WEB)
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
 
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   account   Account   @relation("TransactionAccount", fields: [accountId], references: [id], onDelete: Restrict)
@@ -143,4 +152,34 @@ model Goal {
 
   @@index([userId])
   @@map("goals")
+}
+
+/// บัญชี Telegram ที่เชื่อมกับผู้ใช้ (หนึ่งผู้ใช้ต่อหนึ่งแชต)
+model TelegramLink {
+  id               String   @id @default(cuid())
+  userId           String   @unique @map("user_id")
+  chatId           String   @unique @map("chat_id")
+  username         String?
+  firstName        String?  @map("first_name")
+  defaultAccountId String?  @map("default_account_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultAccount Account? @relation(fields: [defaultAccountId], references: [id], onDelete: SetNull)
+
+  @@map("telegram_links")
+}
+
+/// รหัสใช้ครั้งเดียวสำหรับเชื่อม Telegram (t.me/<bot>?start=<code>)
+model TelegramLinkCode {
+  code      String   @id
+  userId    String   @map("user_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("telegram_link_codes")
 }

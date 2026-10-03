@@ -5,12 +5,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { PageHeader } from "@/components/page-header";
 import { PasswordForm, ProfileForm, ThemeSelect } from "@/components/settings-forms";
 import { requireUser } from "@/lib/session";
+import { db } from "@/lib/db";
+import { botUsername, telegramConfigured } from "@/lib/telegram/api";
+import { TelegramConnect } from "@/components/telegram-connect";
 import { logoutAction } from "@/lib/actions/auth";
 
 export const metadata: Metadata = { title: "ตั้งค่า" };
 
 export default async function SettingsPage() {
   const user = await requireUser();
+  const link = await db.telegramLink.findUnique({ where: { userId: user.id } });
   return (
     <div className="mx-auto max-w-2xl">
       <PageHeader title="ตั้งค่า" />
@@ -21,6 +25,23 @@ export default async function SettingsPage() {
           </CardHeader>
           <CardContent>
             <ProfileForm name={user.name} email={user.email} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Telegram</CardTitle>
+            <CardDescription>บันทึกรายรับ–รายจ่ายผ่านแชตบอต</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <TelegramConnect
+              configured={telegramConfigured() && Boolean(botUsername())}
+              linked={
+                link
+                  ? { username: link.username, firstName: link.firstName, linkedAt: link.createdAt.toISOString() }
+                  : null
+              }
+            />
           </CardContent>
         </Card>
 
