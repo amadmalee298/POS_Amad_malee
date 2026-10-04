@@ -9,7 +9,7 @@ export const getCurrentUser = cache(async () => {
   const session = await auth();
   const id = session?.user?.id;
   if (!id) return null;
-  return db.user.findUnique({ where: { id }, select: { id: true, name: true, email: true } });
+  return db.user.findUnique({ where: { id }, select: { id: true, name: true, email: true, isAdmin: true } });
 });
 
 export async function requireUser() {
@@ -20,4 +20,10 @@ export async function requireUser() {
 
 export async function requireUserId() {
   return (await requireUser()).id;
+}
+
+export async function requireAdmin() {
+  const user = await requireUser();
+  if (!user.isAdmin) throw new Error("Forbidden");
+  return user;
 }

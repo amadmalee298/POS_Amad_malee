@@ -8,17 +8,28 @@ import { requireUser } from "@/lib/session";
 import { db } from "@/lib/db";
 import { botUsername, telegramConfigured } from "@/lib/telegram/api";
 import { TelegramConnect } from "@/components/telegram-connect";
+import { InviteManager } from "@/components/invite-manager";
 import { logoutAction } from "@/lib/actions/auth";
 
 export const metadata: Metadata = { title: "ตั้งค่า" };
 
 export default async function SettingsPage() {
   const user = await requireUser();
-  const link = await db.telegramLink.findUnique({ where: { userId: user.id } });
+  const now = new Date();
+  const [link, invites] = await Promise.all([
+    db.telegramLink.findUnique({ where: { userId: user.id } }),
+    user.isAdmin
+      ? db.inviteCode.findMany({
+          orderBy: { createdAt: "desc" },
+          take: 20,
+          include: { usedBy: { select: { name: true, email: true } } },
+        })
+      : Promise.resolve([]),
+  ]);
   return (
     <div className="mx-auto max-w-2xl">
       <PageHeader title="ตั้งค่า" />
-      <div className="grid gap-3">
+      <div className="grid gap-3 [&>*]:min-w-0">
         <Card>
           <CardHeader>
             <CardTitle>โปรไฟล์</CardTitle>
@@ -27,6 +38,27 @@ export default async function SettingsPage() {
             <ProfileForm name={user.name} email={user.email} />
           </CardContent>
         </Card>
+
+        {user.isAdmin && (
+          <Card>
+            <CardHeader>
+              <CardTitle>เชิญสมาชิก</CardTitle>
+              <CardDescription>เฉพาะผู้ดูแลระบบ</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <InviteManager
+                invites={invites.map((i) => ({
+                  code: i.code,
+                  note: i.note,
+                  expiresAt: i.expiresAt.toISOString(),
+                  usedAt: i.usedAt?.toISOString() ?? null,
+                  usedBy: i.usedBy ? `${i.usedBy.name} (${i.usedBy.email})` : null,
+                  expired: i.expiresAt < now,
+                }))}
+              />
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
