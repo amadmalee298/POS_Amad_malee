@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/session";
 import { botUsername, sendMessage, telegramConfigured } from "@/lib/telegram/api";
+import { setupWebhook } from "@/lib/telegram/setup";
+import type { ActionResult } from "@/lib/validation";
 
 const CODE_TTL_MS = 15 * 60 * 1000;
 
@@ -13,8 +15,8 @@ export type LinkCodeResult = { ok: true; code: string; url: string; expiresAt: s
 /** สร้างรหัสเชื่อมต่อแบบใช้ครั้งเดียว (อายุ 15 นาที) */
 export async function createTelegramLinkCodeAction(): Promise<LinkCodeResult> {
   const userId = await requireUserId();
-  const bot = botUsername();
-  if (!telegramConfigured() || !bot) return { ok: false, error: "ยังไม่ได้ตั้งค่า Telegram bot บนเซิร์ฟเวอร์" };
+  const bot = telegramConfigured() ? await botUsername() : null;
+  if (!bot) return { ok: false, error: "ยังไม่ได้ตั้งค่า Telegram bot บนเซิร์ฟเวอร์" };
 
   const code = randomBytes(16).toString("base64url"); // ≤ 64 ตัวอักษร, ใช้ได้กับ /start
   const expiresAt = new Date(Date.now() + CODE_TTL_MS);
@@ -34,4 +36,12 @@ export async function unlinkTelegramAction() {
   }
   revalidatePath("/settings");
   return { ok: true as const, message: "ยกเลิกการเชื่อมต่อ Telegram แล้ว" };
+}
+
+/** ลงทะเบียน webhook + เมนูคำสั่งกับ Telegram โดยใช้ค่าจาก env */
+export async function setupTelegramBotAction(): Promise<ActionResult> {
+  await requireUserId();
+  const res = await setupWebhook();
+  revalidatePath("/settings");
+  return res.ok ? { ok: true, message: `บอต @${res.username} พร้อมใช้งานแล้ว` } : { ok: false, error: res.error };
 }

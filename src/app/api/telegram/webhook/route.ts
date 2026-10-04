@@ -1,8 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { handleUpdate, type TgUpdate } from "@/lib/telegram/bot";
+import { webhookSecret } from "@/lib/telegram/api";
 
 function validSecret(header: string | null) {
-  const secret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  const secret = webhookSecret();
   if (!secret || !header) return false;
   const a = Buffer.from(header);
   const b = Buffer.from(secret);
