@@ -1,0 +1,99 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { parseEntry, type ParseAccount, type ParseCategory } from "./parse";
+
+const categories: ParseCategory[] = [
+  ...["เงินเดือน", "รายได้ร้านครัวกะเพรา", "Freelance", "โบนัส", "รายได้อื่น ๆ"].map((name) => ({ id: `in:${name}`, name, type: "INCOME" as const })),
+  ...["อาหาร", "เดินทาง", "บ้าน", "ช้อปปิ้ง", "ค่าน้ำ/ไฟ", "โทรศัพท์", "หนี้สิน", "ธุรกิจ", "อื่น ๆ"].map((name) => ({ id: `ex:${name}`, name, type: "EXPENSE" as const })),
+];
+const accounts: ParseAccount[] = ["เงินสด", "KBank", "SCB", "บัตรเครดิต", "TrueMoney"].map((name) => ({ id: `acc:${name}`, name }));
+const ctx = { categories, accounts };
+
+function parse(text: string) {
+  const r = parseEntry(text, ctx);
+  assert.ok(r.ok, `expected "${text}" to parse`);
+  return r.entry;
+}
+
+describe("parseEntry", () => {
+  it("defaults to an expense and maps food keywords", () => {
+    const e = parse("ข้าวกะเพรา 50");
+    assert.equal(e.type, "EXPENSE");
+    assert.equal(e.amount, 50);
+    assert.equal(e.categoryId, "ex:อาหาร");
+    assert.equal(e.description, "ข้าวกะเพรา");
+    assert.equal(e.accountId, null);
+    assert.equal(e.daysAgo, 0);
+  });
+
+  it("accepts the amount first and without spaces", () => {
+    assert.equal(parse("120 ก๋วยเตี๋ยว").amount, 120);
+    const e = parse("กาแฟ65");
+    assert.equal(e.amount, 65);
+    assert.equal(e.categoryId, "ex:อาหาร");
+  });
+
+  it("treats + and รับ as income and matches category names", () => {
+    const a = parse("+30000 เงินเดือน");
+    assert.equal(a.type, "INCOME");
+    assert.equal(a.amount, 30000);
+    assert.equal(a.categoryId, "in:เงินเดือน");
+    const b = parse("รับ 2500 ยอดขายร้าน");
+    assert.equal(b.type, "INCOME");
+    assert.equal(b.categoryId, "in:รายได้ร้านครัวกะเพรา");
+  });
+
+  it("infers income from strong hints without a sign", () => {
+    const e = parse("เงินเดือน 30,000");
+    assert.equal(e.type, "INCOME");
+    assert.equal(e.amount, 30000);
+    assert.equal(parse("โบนัส 15000").categoryId, "in:โบนัส");
+  });
+
+  it("parses commas, decimals and k/พัน", () => {
+    assert.equal(parse("ค่าไฟ 1,250.50").amount, 1250.5);
+    assert.equal(parse("ค่าไฟ 1,250.50").categoryId, "ex:ค่าน้ำ/ไฟ");
+    assert.equal(parse("grab 1.2k").amount, 1200);
+    assert.equal(parse("ค่าเช่า 6พัน").amount, 6000);
+    assert.equal(parse("ค่าเช่า 6พัน").categoryId, "ex:บ้าน");
+  });
+
+  it("picks the account named in the message", () => {
+    const e = parse("กาแฟ 65 truemoney");
+    assert.equal(e.accountId, "acc:TrueMoney");
+    assert.equal(e.description, "กาแฟ");
+    assert.equal(parse("shopee 890 จ่ายด้วย บัตรเครดิต").accountId, "acc:บัตรเครดิต");
+  });
+
+  it("does not read 7-11 as the amount", () => {
+    const e = parse("7-11 85");
+    assert.equal(e.amount, 85);
+    assert.equal(e.categoryId, "ex:ช้อปปิ้ง");
+  });
+
+  it("prefers the largest number when several appear", () => {
+    assert.equal(parse("กาแฟ 3 แก้ว 150").amount, 150);
+    assert.equal(parse("จ่าย 50 บาท ข้าว 2 จาน").amount, 50); // มีหน่วยกำกับ
+  });
+
+  it("handles yesterday", () => {
+    assert.equal(parse("เมื่อวาน น้ำมัน 500").daysAgo, 1);
+    assert.equal(parse("เมื่อวาน น้ำมัน 500").categoryId, "ex:เดินทาง");
+    assert.equal(parse("เมื่อวานซืน ข้าว 40").daysAgo, 2);
+  });
+
+  it("falls back to the 'other' category", () => {
+    assert.equal(parse("ทำบุญ 100").categoryId, "ex:อื่น ๆ");
+    assert.equal(parse("+500 เพื่อนคืนเงิน").categoryId, "in:รายได้อื่น ๆ");
+  });
+
+  it("explicit minus forces an expense even with income words", () => {
+    const e = parse("-200 ค่าจ้างช่าง");
+    assert.equal(e.type, "EXPENSE");
+  });
+
+  it("rejects text without an amount", () => {
+    assert.deepEqual(parseEntry("สวัสดี", ctx), { ok: false, reason: "no-amount" });
+    assert.deepEqual(parseEntry("ข้าว 0", ctx), { ok: false, reason: "bad-amount" });
+  });
+});
