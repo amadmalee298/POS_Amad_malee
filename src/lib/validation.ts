@@ -65,6 +65,7 @@ export const registerSchema = z.object({
   name: z.string().trim().min(1, "กรุณากรอกชื่อ").max(60),
   email: z.string().trim().toLowerCase().email("อีเมลไม่ถูกต้อง"),
   password: z.string().min(8, "รหัสผ่านอย่างน้อย 8 ตัวอักษร").max(100),
+  invite: z.string().trim().max(40).optional(),
 });
 
 /** แปลง FormData → object (ช่องว่างกลายเป็น undefined) */

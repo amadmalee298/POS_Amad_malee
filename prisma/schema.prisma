@@ -38,16 +38,20 @@ model User {
   name         String
   email        String   @unique
   passwordHash String   @map("password_hash")
+  /// ผู้ดูแล: สร้างรหัสเชิญสมาชิกใหม่ได้ (ผู้ใช้คนแรกของระบบ)
+  isAdmin      Boolean  @default(false) @map("is_admin")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  accounts      Account[]
-  categories    Category[]
-  transactions  Transaction[]
-  budgets       Budget[]
-  goals         Goal[]
-  telegram      TelegramLink?
-  telegramCodes TelegramLinkCode[]
+  accounts       Account[]
+  categories     Category[]
+  transactions   Transaction[]
+  budgets        Budget[]
+  goals          Goal[]
+  telegram       TelegramLink?
+  telegramCodes  TelegramLinkCode[]
+  invitesCreated InviteCode[]       @relation("InviteCreatedBy")
+  inviteUsed     InviteCode?        @relation("InviteUsedBy")
 
   @@map("users")
 }
@@ -182,4 +186,21 @@ model TelegramLinkCode {
 
   @@index([userId])
   @@map("telegram_link_codes")
+}
+
+/// รหัสเชิญสำหรับสมัครสมาชิก — ใช้ได้ครั้งเดียว มีวันหมดอายุ
+model InviteCode {
+  code        String    @id
+  note        String?
+  createdById String    @map("created_by_id")
+  usedById    String?   @unique @map("used_by_id")
+  usedAt      DateTime? @map("used_at")
+  expiresAt   DateTime  @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  createdBy User  @relation("InviteCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  usedBy    User? @relation("InviteUsedBy", fields: [usedById], references: [id], onDelete: SetNull)
+
+  @@index([createdById])
+  @@map("invite_codes")
 }

@@ -8,7 +8,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { loginAction, registerAction } from "@/lib/actions/auth";
 
-export function AuthForm({ mode }: { mode: "login" | "register" }) {
+export function AuthForm({
+  mode,
+  invite,
+  inviteRequired = true,
+}: {
+  mode: "login" | "register";
+  invite?: string;
+  inviteRequired?: boolean;
+}) {
   const isLogin = mode === "login";
   const [state, action, pending] = useActionState(isLogin ? loginAction : registerAction, undefined);
 
@@ -17,11 +25,30 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
       <CardHeader>
         <CardTitle>{isLogin ? "เข้าสู่ระบบ" : "สมัครสมาชิก"}</CardTitle>
         <CardDescription>
-          {isLogin ? "ยินดีต้อนรับกลับมา" : "ระบบจะสร้างบัญชีเงินและหมวดหมู่เริ่มต้นให้อัตโนมัติ"}
+          {isLogin
+            ? "ยินดีต้อนรับกลับมา"
+            : inviteRequired
+              ? "ต้องมีรหัสเชิญจากผู้ดูแลระบบ"
+              : "คุณเป็นผู้ใช้คนแรก จะได้สิทธิ์ผู้ดูแลระบบ"}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form action={action} className="grid gap-4">
+          {!isLogin && inviteRequired && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="invite">รหัสเชิญ</Label>
+              <Input
+                id="invite"
+                name="invite"
+                required
+                defaultValue={invite}
+                autoCapitalize="characters"
+                autoComplete="off"
+                placeholder="XXXX-XXXX"
+                className="font-mono tracking-wider uppercase"
+              />
+            </div>
+          )}
           {!isLogin && (
             <div className="grid gap-1.5">
               <Label htmlFor="name">ชื่อ</Label>
