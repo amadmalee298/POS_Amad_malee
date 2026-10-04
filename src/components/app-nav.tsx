@@ -105,6 +105,10 @@ export function Sidebar({ user }: { user: { name: string; email: string } }) {
   );
 }
 
+export function SidebarSkeleton() {
+  return <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 border-r bg-sidebar md:block" aria-hidden />;
+}
+
 export function MobileTopBar() {
   return (
     <header className="sticky top-0 z-30 flex h-12 items-center justify-between border-b bg-background/85 px-4 backdrop-blur md:hidden">
