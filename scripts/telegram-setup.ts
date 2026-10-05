@@ -10,6 +10,7 @@ const COMMANDS = [
   { command: "month", description: "สรุปเดือนนี้" },
   { command: "balance", description: "ยอดเงินแต่ละบัญชี" },
   { command: "recent", description: "รายการล่าสุด" },
+  { command: "transfer", description: "โอนเงินระหว่างบัญชี" },
   { command: "account", description: "ตั้งบัญชีเริ่มต้น" },
   { command: "undo", description: "ลบรายการล่าสุดที่บันทึกผ่านแชต" },
   { command: "help", description: "วิธีใช้" },

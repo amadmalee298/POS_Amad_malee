@@ -2,7 +2,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import { getAccountsWithBalance, getCategoryBreakdown, getTotals, getTransactions } from "@/lib/queries";
 import { formatDate, formatMoney, monthLabel, monthRange, parseISODate, todayISO } from "@/lib/format";
-import { parseEntry } from "./parse";
+import { parseEntry, parseTransfer } from "./parse";
 import { answerCallback, editMessage, escapeHtml as h, sendMessage, type InlineKeyboard } from "./api";
 
 // ---------------------------------------------------------------------------
@@ -26,13 +26,34 @@ const HELP = `<b>วิธีบันทึก</b> — พิมพ์ราย
 • <code>เมื่อวาน grab 120</code> → บันทึกเป็นของเมื่อวาน
 • <code>ค่าไฟ 1,250.50</code> / <code>shopee 1.2k</code>
 
+<b>โอนเงินระหว่างบัญชี</b> (ไม่นับเป็นรายรับ/รายจ่าย)
+• <code>โอน 1000 kbank truemoney</code> → KBank ไป TrueMoney
+• <code>โอนเข้า scb 500 จาก kbank</code>
+• <code>ถอน 3000 kbank</code> → ถอนเข้าเงินสด
+• <code>ฝาก 2000 scb</code> → เงินสดเข้า SCB
+• <code>จ่ายบัตร 5000 kbank</code> → จ่ายบัตรเครดิต
+• <code>โอน 1000</code> → เลือกบัญชีจากปุ่ม
+
 ระบบเดาหมวดจากคำในข้อความ แก้หมวด/บัญชี หรือยกเลิกได้จากปุ่มใต้ข้อความยืนยัน
 
 <b>คำสั่ง</b>
 /today สรุปวันนี้ · /month สรุปเดือนนี้
 /balance ยอดเงินแต่ละบัญชี · /recent รายการล่าสุด
 /account ตั้งบัญชีเริ่มต้น · /undo ลบรายการล่าสุด
+/transfer วิธีโอนเงินระหว่างบัญชี
 /unlink ยกเลิกการเชื่อมต่อ`;
+
+const TRANSFER_HELP = `<b>โอนเงินระหว่างบัญชี</b>
+• <code>โอน 1000 kbank truemoney</code> — จากบัญชีแรกไปบัญชีที่สอง
+• <code>โอนเข้า scb 500 จาก kbank</code> — ใช้คำว่า จาก / ไป / เข้า บอกทิศทาง
+• <code>ถอน 3000 kbank</code> — ถอนเข้าเงินสด
+• <code>ฝาก 2000 scb</code> — นำเงินสดเข้าบัญชี
+• <code>จ่ายบัตร 5000 kbank</code> — จ่ายบัตรเครดิต
+• <code>โอน 1000</code> — แล้วเลือกบัญชีจากปุ่ม
+
+การโอนไม่นับเป็นรายรับหรือรายจ่าย แค่ย้ายเงินระหว่างบัญชี`;
+
+const txLabel = (type: string) => (type === "INCOME" ? "รายรับ" : type === "EXPENSE" ? "รายจ่าย" : "โอน");
 
 // ---------------------------------------------------------------------------
 // จุดเข้า
@@ -80,6 +101,8 @@ export async function handleUpdate(update: TgUpdate) {
       return sendRecent(link);
     case "account":
       return sendAccountPicker(link);
+    case "transfer":
+      return args.length ? recordEntry(link, `โอน ${args.join(" ")}`) : sendMessage(chatId, TRANSFER_HELP);
     case "undo":
       return undoLast(link);
     case "unlink":
@@ -133,8 +156,32 @@ async function defaultAccountId(link: Link) {
 async function recordEntry(link: Link, text: string) {
   const [categories, accounts] = await Promise.all([
     db.category.findMany({ where: { userId: link.userId }, select: { id: true, name: true, type: true } }),
-    db.account.findMany({ where: { userId: link.userId, archived: false }, select: { id: true, name: true } }),
+    db.account.findMany({ where: { userId: link.userId, archived: false }, select: { id: true, name: true, type: true } }),
   ]);
+
+  // คำสั่งโอนเงิน (โอน/ถอน/ฝาก/จ่ายบัตร) — ถ้าไม่มีบัญชีบัตรเครดิต "จ่ายบัตร" จะบันทึกเป็นรายจ่ายตามเดิม
+  const tr = parseTransfer(text, { accounts });
+  if (tr && !(!tr.ok && tr.reason === "no-card-account")) {
+    if (!tr.ok) {
+      const msg = {
+        "no-amount": "🤔 ไม่พบจำนวนเงิน ลองพิมพ์แบบนี้: <code>โอน 1000 kbank truemoney</code>",
+        "bad-amount": "จำนวนเงินต้องมากกว่า 0",
+        "same-account": "บัญชีต้นทางและปลายทางต้องไม่ซ้ำกัน",
+        "no-cash-account": "ยังไม่มีบัญชีประเภทเงินสด — สร้างในเว็บก่อน หรือใช้ <code>โอน 3000 kbank เงินสด</code>",
+        "no-card-account": "",
+      }[tr.reason];
+      await sendMessage(link.chatId, msg);
+      return;
+    }
+    const t = tr.transfer;
+    const fromId = t.fromId ?? (t.fromDefault ? await defaultAccountId(link) : null);
+    if (fromId && fromId === t.toId) {
+      await sendMessage(link.chatId, "บัญชีต้นทางและปลายทางต้องไม่ซ้ำกัน — ระบุบัญชีต้นทางในข้อความ เช่น <code>ถอน 3000 kbank</code>");
+      return;
+    }
+    return continueTransfer(link, { amount: t.amount, fromId, toId: t.toId, daysAgo: t.daysAgo, description: t.description });
+  }
+
   const parsed = parseEntry(text, { categories, accounts });
   if (!parsed.ok) {
     await sendMessage(
@@ -201,6 +248,108 @@ function txKeyboard(txId: string): InlineKeyboard {
   ];
 }
 
+// ---------------------------------------------------------------------------
+// โอนเงิน
+// ---------------------------------------------------------------------------
+
+type TransferDraft = {
+  amount: number;
+  fromId: string | null;
+  toId: string | null;
+  daysAgo: number;
+  description?: string;
+};
+
+// callback_data จำกัด 64 ไบต์ → x:<วันย้อนหลัง><สตางค์ฐาน36>:<from|->:<to|-> (cuid 25 ตัว)
+function encodeDraft(d: TransferDraft) {
+  return `x:${d.daysAgo}${Math.round(d.amount * 100).toString(36)}:${d.fromId ?? "-"}:${d.toId ?? "-"}`;
+}
+
+function decodeDraft(data: string): TransferDraft | null {
+  const m = /^x:([0-2])([0-9a-z]+):([^:]+):([^:]+)$/.exec(data);
+  if (!m) return null;
+  const cents = parseInt(m[2], 36);
+  if (!Number.isSafeInteger(cents) || cents <= 0) return null;
+  return {
+    daysAgo: Number(m[1]),
+    amount: cents / 100,
+    fromId: m[3] === "-" ? null : m[3],
+    toId: m[4] === "-" ? null : m[4],
+  };
+}
+
+/** ถ้ายังขาดบัญชี ให้เลือกจากปุ่ม ไม่งั้นบันทึกเลย */
+async function continueTransfer(link: Link, d: TransferDraft, messageId?: number) {
+  if (d.fromId && d.toId) {
+    const res = await createTransfer(link, d);
+    const [text, keyboard]: [string, InlineKeyboard | undefined] =
+      typeof res === "string" ? [res, undefined] : [res.text, [[{ text: "↩️ ยกเลิกรายการนี้", callback_data: `u:${res.id}` }]]];
+    if (messageId) await editMessage(link.chatId, messageId, text, keyboard);
+    else await sendMessage(link.chatId, text, keyboard);
+    return;
+  }
+
+  const accounts = await db.account.findMany({
+    where: { userId: link.userId, archived: false },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+  });
+  const picking = d.fromId ? "to" : "from";
+  const other = picking === "to" ? d.fromId : d.toId;
+  const otherAcc = accounts.find((a) => a.id === other);
+  const choices = accounts.filter((a) => a.id !== other);
+  const title =
+    picking === "from"
+      ? `💸 โอน <b>${formatMoney(d.amount)}</b>${otherAcc ? ` ไป ${otherAcc.icon} ${h(otherAcc.name)}` : ""}\nเลือก<b>บัญชีต้นทาง</b>:`
+      : `💸 โอน <b>${formatMoney(d.amount)}</b> จาก ${otherAcc?.icon ?? ""} ${h(otherAcc?.name ?? "")}\nเลือก<b>บัญชีปลายทาง</b>:`;
+  const keyboard: InlineKeyboard = [
+    ...grid(
+      choices.map((a) => ({
+        text: `${a.icon} ${a.name}`,
+        callback_data: encodeDraft(picking === "from" ? { ...d, fromId: a.id } : { ...d, toId: a.id }),
+      })),
+      2,
+    ),
+    [{ text: "✖️ ยกเลิก", callback_data: "xc" }],
+  ];
+  if (messageId) await editMessage(link.chatId, messageId, title, keyboard);
+  else await sendMessage(link.chatId, title, keyboard);
+}
+
+async function createTransfer(link: Link, d: TransferDraft): Promise<string | { id: string; text: string }> {
+  if (d.fromId === d.toId) return "บัญชีต้นทางและปลายทางต้องไม่ซ้ำกัน";
+  const accs = await db.account.findMany({ where: { userId: link.userId, id: { in: [d.fromId!, d.toId!] } } });
+  const from = accs.find((a) => a.id === d.fromId);
+  const to = accs.find((a) => a.id === d.toId);
+  if (!from || !to) return "ไม่พบบัญชีที่เลือก";
+
+  const date = parseISODate(todayISO());
+  date.setUTCDate(date.getUTCDate() - d.daysAgo);
+  const tx = await db.transaction.create({
+    data: {
+      userId: link.userId,
+      type: "TRANSFER",
+      amount: d.amount,
+      date,
+      accountId: from.id,
+      toAccountId: to.id,
+      description: d.description ?? "",
+      source: "TELEGRAM",
+    },
+  });
+  const balances = await getAccountsWithBalance(link.userId, { includeArchived: true });
+  const bal = (id: string) => formatMoney(balances.find((b) => b.id === id)?.balance ?? 0);
+  return {
+    id: tx.id,
+    text: [
+      `✅ บันทึกการโอน <b>${formatMoney(d.amount)}</b>`,
+      `${from.icon} ${h(from.name)} → ${to.icon} ${h(to.name)}`,
+      `📅 ${formatDate(date)}${d.description ? ` · ${h(d.description)}` : ""}`,
+      "",
+      `<i>คงเหลือ: ${h(from.name)} ${bal(from.id)} · ${h(to.name)} ${bal(to.id)}</i>`,
+    ].join("\n"),
+  };
+}
+
 /** จัดปุ่มเป็นแถวละ n ปุ่ม */
 function grid<T>(items: T[], n: number) {
   const rows: T[][] = [];
@@ -221,6 +370,19 @@ async function handleCallback(cb: TgCallback) {
     return;
   }
   const [action, a, b] = cb.data.split(":");
+
+  // เลือกบัญชีสำหรับการโอน
+  if (action === "xc") {
+    await answerCallback(cb.id, "ยกเลิกแล้ว");
+    if (messageId) await editMessage(chatId, messageId, "✖️ ยกเลิกการโอน");
+    return;
+  }
+  if (action === "x") {
+    const draft = decodeDraft(cb.data);
+    if (!draft) return answerCallback(cb.id, "ข้อมูลไม่ถูกต้อง");
+    await answerCallback(cb.id);
+    return continueTransfer(link, draft, messageId);
+  }
 
   // ตั้งบัญชีเริ่มต้น
   if (action === "d") {
@@ -244,7 +406,7 @@ async function handleCallback(cb: TgCallback) {
       await db.transaction.delete({ where: { id: tx.id } });
       await answerCallback(cb.id, "ยกเลิกแล้ว");
       if (messageId)
-        await editMessage(chatId, messageId, `↩️ <s>${tx.type === "INCOME" ? "รายรับ" : "รายจ่าย"} ${formatMoney(Number(tx.amount))}${tx.description ? ` ${h(tx.description)}` : ""}</s> — ยกเลิกแล้ว`);
+        await editMessage(chatId, messageId, `↩️ <s>${txLabel(tx.type)} ${formatMoney(Number(tx.amount))}${tx.description ? ` ${h(tx.description)}` : ""}</s> — ยกเลิกแล้ว`);
       return;
     }
     case "c": {
@@ -372,6 +534,6 @@ async function undoLast(link: Link) {
   await db.transaction.delete({ where: { id: last.id } });
   await sendMessage(
     link.chatId,
-    `↩️ ลบ${last.type === "INCOME" ? "รายรับ" : "รายจ่าย"} ${formatMoney(Number(last.amount))}${last.description ? ` (${h(last.description)})` : ""} แล้ว`,
+    `↩️ ลบ${txLabel(last.type)} ${formatMoney(Number(last.amount))}${last.description ? ` (${h(last.description)})` : ""} แล้ว`,
   );
 }
