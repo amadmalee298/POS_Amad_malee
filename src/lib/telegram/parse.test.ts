@@ -1,12 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseEntry, type ParseAccount, type ParseCategory } from "./parse";
+import { parseEntry, parseTransfer, type ParseAccount, type ParseCategory } from "./parse";
 
 const categories: ParseCategory[] = [
   ...["เงินเดือน", "รายได้ร้านครัวกะเพรา", "Freelance", "โบนัส", "รายได้อื่น ๆ"].map((name) => ({ id: `in:${name}`, name, type: "INCOME" as const })),
   ...["อาหาร", "เดินทาง", "บ้าน", "ช้อปปิ้ง", "ค่าน้ำ/ไฟ", "โทรศัพท์", "หนี้สิน", "ธุรกิจ", "อื่น ๆ"].map((name) => ({ id: `ex:${name}`, name, type: "EXPENSE" as const })),
 ];
-const accounts: ParseAccount[] = ["เงินสด", "KBank", "SCB", "บัตรเครดิต", "TrueMoney"].map((name) => ({ id: `acc:${name}`, name }));
+const ACCOUNT_TYPES: Record<string, string> = { เงินสด: "CASH", KBank: "BANK", SCB: "BANK", บัตรเครดิต: "CREDIT_CARD", TrueMoney: "EWALLET" };
+const accounts: ParseAccount[] = Object.entries(ACCOUNT_TYPES).map(([name, type]) => ({ id: `acc:${name}`, name, type }));
 const ctx = { categories, accounts };
 
 function parse(text: string) {
@@ -95,5 +96,89 @@ describe("parseEntry", () => {
   it("rejects text without an amount", () => {
     assert.deepEqual(parseEntry("สวัสดี", ctx), { ok: false, reason: "no-amount" });
     assert.deepEqual(parseEntry("ข้าว 0", ctx), { ok: false, reason: "bad-amount" });
+  });
+});
+
+describe("parseTransfer", () => {
+  const t = (text: string, accs = accounts) => {
+    const r = parseTransfer(text, { accounts: accs });
+    assert.ok(r && r.ok, `expected "${text}" to parse as transfer, got ${JSON.stringify(r)}`);
+    return r.transfer;
+  };
+
+  it("ignores messages that are not transfers", () => {
+    assert.equal(parseTransfer("ข้าว 50", { accounts }), null);
+    assert.equal(parseTransfer("+30000 เงินเดือน", { accounts }), null);
+  });
+
+  it("reads from → to in message order", () => {
+    const x = t("โอน 1000 kbank truemoney");
+    assert.equal(x.amount, 1000);
+    assert.equal(x.fromId, "acc:KBank");
+    assert.equal(x.toId, "acc:TrueMoney");
+    assert.equal(x.fromDefault, false);
+  });
+
+  it("respects direction words", () => {
+    const x = t("โอนเข้า scb 500 จาก kbank");
+    assert.equal(x.fromId, "acc:KBank");
+    assert.equal(x.toId, "acc:SCB");
+    const y = t("โอนเงิน 2,500 จาก TrueMoney ไป เงินสด ค่าขนม");
+    assert.equal(y.amount, 2500);
+    assert.equal(y.fromId, "acc:TrueMoney");
+    assert.equal(y.toId, "acc:เงินสด");
+    assert.equal(y.description, "ค่าขนม");
+  });
+
+  it("leaves missing accounts for the user to pick", () => {
+    const x = t("โอน 1000");
+    assert.equal(x.fromId, null);
+    assert.equal(x.toId, null);
+    const y = t("โอน 300 ไป scb");
+    assert.equal(y.fromId, null);
+    assert.equal(y.toId, "acc:SCB");
+  });
+
+  it("withdraw goes to the cash account", () => {
+    const x = t("ถอน 3000 kbank");
+    assert.equal(x.fromId, "acc:KBank");
+    assert.equal(x.toId, "acc:เงินสด");
+    const y = t("ถอนเงิน 500");
+    assert.equal(y.fromId, null);
+    assert.equal(y.fromDefault, true);
+  });
+
+  it("deposit comes from the cash account", () => {
+    const x = t("ฝาก 2000 scb");
+    assert.equal(x.fromId, "acc:เงินสด");
+    assert.equal(x.toId, "acc:SCB");
+  });
+
+  it("card payment goes to the credit card", () => {
+    const x = t("จ่ายบัตร 5,000 kbank");
+    assert.equal(x.toId, "acc:บัตรเครดิต");
+    assert.equal(x.fromId, "acc:KBank");
+    const y = t("จ่ายบัตรเครดิต 1.5k");
+    assert.equal(y.amount, 1500);
+    assert.equal(y.fromDefault, true);
+  });
+
+  it("reports problems", () => {
+    assert.deepEqual(parseTransfer("โอน kbank scb", { accounts }), { ok: false, reason: "no-amount" });
+    assert.deepEqual(parseTransfer("โอน 100 kbank ไป kbank", { accounts }), { ok: false, reason: "same-account" });
+    const noCard = accounts.filter((a) => a.type !== "CREDIT_CARD");
+    assert.deepEqual(parseTransfer("จ่ายบัตร 500", { accounts: noCard }), { ok: false, reason: "no-card-account" });
+  });
+
+  it("treats paying someone as an expense, not a transfer", () => {
+    assert.equal(parseTransfer("โอนค่าเช่า 6000", { accounts }), null);
+    assert.equal(parseTransfer("โอนให้แม่ 2000", { accounts }), null);
+    assert.equal(parseEntry("โอนค่าเช่า 6000", ctx).ok && (parseEntry("โอนค่าเช่า 6000", ctx) as { entry: { categoryId: string } }).entry.categoryId, "ex:บ้าน");
+    assert.ok(parseTransfer("โอนให้ scb 500 จาก kbank", { accounts })?.ok);
+  });
+
+  it("uses yesterday", () => {
+    assert.equal(t("เมื่อวาน โอน 100 kbank scb").daysAgo, 1);
+    assert.equal(t("โอน 100 kbank scb เมื่อวาน").daysAgo, 1);
   });
 });

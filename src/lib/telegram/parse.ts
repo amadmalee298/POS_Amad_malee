@@ -7,9 +7,13 @@
 //   รับ 2500 ยอดขายร้าน       → รายรับ
 //   เมื่อวาน น้ำมัน 500        → รายจ่ายของเมื่อวาน
 //   ค่าไฟ 1,250.50 / grab 1.2k
+//
+// การโอนระหว่างบัญชี (parseTransfer):
+//   โอน 1000 kbank truemoney  /  โอนเข้า scb 500 จาก kbank
+//   ถอน 3000 kbank (→ เงินสด)  /  ฝาก 2000 scb (เงินสด →)  /  จ่ายบัตร 5000 kbank (→ บัตรเครดิต)
 
 export type ParseCategory = { id: string; name: string; type: "INCOME" | "EXPENSE" };
-export type ParseAccount = { id: string; name: string };
+export type ParseAccount = { id: string; name: string; type?: string };
 
 export type ParsedEntry = {
   type: "INCOME" | "EXPENSE";
@@ -171,4 +175,118 @@ export function parseEntry(
 
   if (description.length > 200) description = description.slice(0, 200);
   return { ok: true, entry: { type, amount, description, categoryId, accountId, daysAgo } };
+}
+
+// ---------------------------------------------------------------------------
+// การโอนระหว่างบัญชี
+// ---------------------------------------------------------------------------
+
+export type ParsedTransfer = {
+  amount: number;
+  fromId: string | null; // null = ให้ผู้ใช้เลือก (หรือใช้บัญชีเริ่มต้น ถ้า fromDefault)
+  toId: string | null; // null = ให้ผู้ใช้เลือก
+  fromDefault: boolean; // ไม่ระบุต้นทาง → ใช้บัญชีเริ่มต้นได้ (ถอน/จ่ายบัตร)
+  description: string;
+  daysAgo: number;
+};
+
+export type TransferResult =
+  | { ok: true; transfer: ParsedTransfer }
+  | { ok: false; reason: "no-amount" | "bad-amount" | "same-account" | "no-cash-account" | "no-card-account" };
+
+type TransferKind = "transfer" | "withdraw" | "deposit" | "card";
+
+const TRANSFER_PREFIXES: { re: RegExp; kind: TransferKind }[] = [
+  { re: /^(?:โอนเงิน|โอน|ย้ายเงิน|transfer)/i, kind: "transfer" },
+  { re: /^(?:ถอนเงินสด|ถอนเงิน|ถอน|withdraw)/i, kind: "withdraw" },
+  { re: /^(?:ฝากเงิน|ฝาก|deposit)/i, kind: "deposit" },
+  { re: /^(?:จ่ายบัตรเครดิต|ชำระบัตรเครดิต|จ่ายบัตร|ชำระบัตร)/i, kind: "card" },
+];
+
+const TO_WORD = /(?:ไปยัง|ไปที่|ไป|เข้า|ให้|to|→|->|>)\s*$/i;
+const FROM_WORD = /(?:จาก|from)\s*$/i;
+
+/** แยกคำสั่งโอนเงิน — คืน null ถ้าข้อความไม่ใช่คำสั่งโอน (ให้ไปใช้ parseEntry แทน) */
+export function parseTransfer(input: string, ctx: { accounts: ParseAccount[] }): TransferResult | null {
+  let text = input.replace(/\s+/g, " ").trim();
+
+  let daysAgo = 0;
+  if (/เมื่อวานซืน/.test(text)) {
+    daysAgo = 2;
+    text = text.replace(/เมื่อวานซืน/g, " ");
+  } else if (/เมื่อวาน|yesterday/i.test(text)) {
+    daysAgo = 1;
+    text = text.replace(/เมื่อวาน|yesterday/gi, " ");
+  }
+  text = text.replace(/วันนี้|today/gi, " ").trim();
+
+  const prefix = TRANSFER_PREFIXES.find((p) => p.re.test(text));
+  if (!prefix) return null;
+  const kind = prefix.kind;
+  text = text.replace(prefix.re, " ");
+
+  // หาชื่อบัญชีทั้งหมดในข้อความ (ยาวสุดก่อน แล้วลบช่วงที่จับได้ออก กันจับซ้อนกัน)
+  type Mention = { id: string; type?: string; index: number; role: "from" | "to" | null };
+  const mentions: Mention[] = [];
+  let scan = text;
+  for (const acc of [...ctx.accounts].filter((a) => a.name.trim()).sort((a, b) => b.name.length - a.name.length)) {
+    const i = scan.toLowerCase().indexOf(acc.name.toLowerCase());
+    if (i < 0) continue;
+    const before = text.slice(0, i);
+    const role = TO_WORD.test(before) ? "to" : FROM_WORD.test(before) ? "from" : null;
+    mentions.push({ id: acc.id, type: acc.type, index: i, role });
+    scan = scan.slice(0, i) + "\u0000".repeat(acc.name.length) + scan.slice(i + acc.name.length);
+    if (scan.toLowerCase().includes(acc.name.toLowerCase())) return { ok: false, reason: "same-account" };
+  }
+  mentions.sort((a, b) => a.index - b.index);
+  // "โอนค่าเช่า 6000" / "โอนให้แม่ 2000" = จ่ายเงินออกไป ไม่ใช่ย้ายระหว่างบัญชีตัวเอง → ให้ parseEntry จัดการเป็นรายจ่าย
+  if (kind === "transfer" && mentions.length === 0 && /^\s*(?:ค่า|ให้)/.test(text)) return null;
+  // ลบชื่อบัญชีและคำเชื่อมออกจากข้อความ ก่อนหาจำนวนเงิน (กันตัวเลขในชื่อบัญชี)
+  text = scan.replace(/\u0000+/g, " ").replace(/(?:^|\s)(?:ไปยัง|ไปที่|ไป|เข้า|ให้|จาก|to|from|→|->|>)(?=\s|$|\d)/gi, " ");
+
+  const amounts = findAmounts(text);
+  if (!amounts.length) return { ok: false, reason: "no-amount" };
+  const pick = amounts.find((a) => a.marked) ?? amounts.reduce((a, b) => (b.value > a.value ? b : a));
+  const amount = Math.round(pick.value * 100) / 100;
+  if (!(amount > 0) || amount >= 1e12) return { ok: false, reason: "bad-amount" };
+  const description = removeRange(text, pick.index, pick.length).replace(/\s+/g, " ").trim().slice(0, 200);
+
+  const cash = ctx.accounts.find((a) => a.type === "CASH");
+  const card = ctx.accounts.find((a) => a.type === "CREDIT_CARD");
+  let fromId: string | null = null;
+  let toId: string | null = null;
+  let fromDefault = false;
+
+  // บัญชีที่มีคำบอกทิศทางกำกับก่อน แล้วที่เหลือเติมตามลำดับในข้อความ
+  const explicitTo = mentions.find((m) => m.role === "to");
+  const explicitFrom = mentions.find((m) => m.role === "from");
+  const rest = mentions.filter((m) => m !== explicitTo && m !== explicitFrom);
+
+  if (kind === "transfer") {
+    fromId = explicitFrom?.id ?? null;
+    toId = explicitTo?.id ?? null;
+    for (const m of rest) {
+      if (!fromId) fromId = m.id;
+      else if (!toId) toId = m.id;
+    }
+    // "โอน 500 truemoney" (บัญชีเดียว ไม่มีคำบอกทิศ) → ถือเป็นต้นทาง แล้วให้เลือกปลายทาง
+  } else if (kind === "withdraw") {
+    if (!cash) return { ok: false, reason: "no-cash-account" };
+    toId = cash.id;
+    fromId = (explicitFrom ?? rest.find((m) => m.id !== cash.id) ?? explicitTo)?.id ?? null;
+    fromDefault = !fromId;
+  } else if (kind === "deposit") {
+    if (!cash) return { ok: false, reason: "no-cash-account" };
+    fromId = cash.id;
+    toId = (explicitTo ?? rest.find((m) => m.id !== cash.id) ?? explicitFrom)?.id ?? null;
+  } else {
+    const namedCard = mentions.find((m) => m.type === "CREDIT_CARD");
+    if (!namedCard && !card) return { ok: false, reason: "no-card-account" };
+    toId = (explicitTo ?? namedCard)?.id ?? card!.id;
+    fromId = (explicitFrom ?? mentions.find((m) => m.id !== toId))?.id ?? null;
+    fromDefault = !fromId;
+  }
+
+  if (fromId && toId && fromId === toId) return { ok: false, reason: "same-account" };
+  return { ok: true, transfer: { amount, fromId, toId, fromDefault, description, daysAgo } };
 }
