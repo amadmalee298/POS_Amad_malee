@@ -4,7 +4,9 @@ import { getAccountsWithBalance, getCategoryBreakdown, getTotals, getTransaction
 import { formatDate, formatMoney, monthLabel, monthRange, parseISODate, todayISO } from "@/lib/format";
 import { getPendingClose } from "@/lib/month-close";
 import { currentMonth, shiftMonth } from "@/lib/format";
-import { parseEntry, parseTransfer } from "./parse";
+import { parseDebtPayment, parseEntry, parseTransfer } from "./parse";
+import { DebtError, getCardDebts, getDebts, payDebt, reopenIfOwing, type DebtView } from "@/lib/debts";
+import { toISODate } from "@/lib/format";
 import { answerCallback, editMessage, escapeHtml as h, sendMessage, type InlineKeyboard } from "./api";
 
 // ---------------------------------------------------------------------------
@@ -41,6 +43,9 @@ const HELP = `<b>วิธีบันทึก</b> — พิมพ์ราย
 • <code>จ่ายบัตร 5000 kbank</code> → จ่ายบัตรเครดิต
 • <code>โอน 1000</code> → เลือกบัญชีจากปุ่ม
 
+<b>ชำระหนี้</b> (หนี้ที่เพิ่มไว้ในหน้า “หนี้สิน”)
+• <code>ผ่อน มอไซค์ 4500</code> / <code>จ่ายหนี้ กยศ</code> → ไม่ใส่จำนวน = ค่างวดปกติ
+
 ระบบเดาหมวดจากคำในข้อความ แก้หมวด/บัญชี หรือยกเลิกได้จากปุ่มใต้ข้อความยืนยัน
 
 <b>คำสั่ง</b>
@@ -49,6 +54,7 @@ const HELP = `<b>วิธีบันทึก</b> — พิมพ์ราย
 /account ตั้งบัญชีเริ่มต้น · /undo ลบรายการล่าสุด
 /transfer วิธีโอนเงินระหว่างบัญชี
 /close ปิดยอดเดือนที่แล้ว
+/debts หนี้คงเหลือและค่างวด
 /unlink ยกเลิกการเชื่อมต่อ`;
 
 const TRANSFER_HELP = `<b>โอนเงินระหว่างบัญชี</b>
@@ -107,6 +113,9 @@ export async function handleUpdate(update: TgUpdate) {
       return sendBalance(link);
     case "close":
       return sendMonthCloseReminder(link, { always: true });
+    case "debts":
+    case "debt":
+      return sendDebts(link);
     case "recent":
       return sendRecent(link);
     case "account":
@@ -191,6 +200,17 @@ async function recordEntry(link: Link, text: string) {
     }
     return continueTransfer(link, { amount: t.amount, fromId, toId: t.toId, daysAgo: t.daysAgo, description: t.description });
   }
+
+  // ชำระหนี้ที่ติดตามไว้
+  const openDebts = await db.debt.findMany({
+    where: { userId: link.userId, closedAt: null },
+    select: { id: true, name: true, monthlyPayment: true },
+    orderBy: { createdAt: "asc" },
+  });
+  const dp = parseDebtPayment(text, {
+    debts: openDebts.map((d) => ({ id: d.id, name: d.name, monthly: d.monthlyPayment == null ? null : Number(d.monthlyPayment) })),
+  });
+  if (dp) return continueDebtPayment(link, dp);
 
   const parsed = parseEntry(text, { categories, accounts });
   if (!parsed.ok) {
@@ -384,7 +404,7 @@ async function handleCallback(cb: TgCallback) {
   // เลือกบัญชีสำหรับการโอน
   if (action === "xc") {
     await answerCallback(cb.id, "ยกเลิกแล้ว");
-    if (messageId) await editMessage(chatId, messageId, "✖️ ยกเลิกการโอน");
+    if (messageId) await editMessage(chatId, messageId, "✖️ ยกเลิกแล้ว");
     return;
   }
   if (action === "x") {
@@ -392,6 +412,20 @@ async function handleCallback(cb: TgCallback) {
     if (!draft) return answerCallback(cb.id, "ข้อมูลไม่ถูกต้อง");
     await answerCallback(cb.id);
     return continueTransfer(link, draft, messageId);
+  }
+
+  // เลือกหนี้ที่จะชำระ: dp:<debtId>:<วันย้อนหลัง><สตางค์ฐาน36|->
+  if (action === "dp") {
+    const m = /^([0-2])([0-9a-z]+|-)$/.exec(b ?? "");
+    if (!m) return answerCallback(cb.id, "ข้อมูลไม่ถูกต้อง");
+    await answerCallback(cb.id);
+    const amount = m[2] === "-" ? null : parseInt(m[2], 36) / 100;
+    return continueDebtPayment(link, { debtId: a, amount, daysAgo: Number(m[1]) }, messageId);
+  }
+  // ปุ่ม "จ่ายแล้ว" จากข้อความเตือน: ชำระค่างวดปกติวันนี้
+  if (action === "dq") {
+    await answerCallback(cb.id);
+    return continueDebtPayment(link, { debtId: a, amount: null, daysAgo: 0 }, messageId);
   }
 
   // ตั้งบัญชีเริ่มต้น
@@ -413,7 +447,9 @@ async function handleCallback(cb: TgCallback) {
 
   switch (action) {
     case "u": {
+      const payment = await db.debtPayment.findUnique({ where: { transactionId: tx.id }, select: { debtId: true } });
       await db.transaction.delete({ where: { id: tx.id } });
+      if (payment) await reopenIfOwing(link.userId, payment.debtId);
       await answerCallback(cb.id, "ยกเลิกแล้ว");
       if (messageId)
         await editMessage(chatId, messageId, `↩️ <s>${txLabel(tx.type)} ${formatMoney(Number(tx.amount))}${tx.description ? ` ${h(tx.description)}` : ""}</s> — ยกเลิกแล้ว`);
@@ -541,7 +577,9 @@ async function undoLast(link: Link) {
     orderBy: { createdAt: "desc" },
   });
   if (!last) return sendMessage(link.chatId, "ไม่มีรายการที่บันทึกผ่านแชตให้ยกเลิก");
+  const payment = await db.debtPayment.findUnique({ where: { transactionId: last.id }, select: { debtId: true } });
   await db.transaction.delete({ where: { id: last.id } });
+  if (payment) await reopenIfOwing(link.userId, payment.debtId);
   await sendMessage(
     link.chatId,
     `↩️ ลบ${txLabel(last.type)} ${formatMoney(Number(last.amount))}${last.description ? ` (${h(last.description)})` : ""} แล้ว`,
@@ -577,4 +615,119 @@ export async function sendMonthCloseReminder(link: Pick<Link, "userId" | "chatId
     url ? [[{ text: pending.net > 0 ? "แบ่งเงินเลย" : "เปิดหน้าปิดยอด", url: `${url}/monthly/${pending.month}` }]] : undefined,
   );
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// หนี้สิน
+// ---------------------------------------------------------------------------
+
+const encodeAmount = (n: number | null) => (n == null ? "-" : Math.round(n * 100).toString(36));
+
+async function continueDebtPayment(
+  link: Link,
+  p: { debtId: string | null; amount: number | null; daysAgo: number },
+  messageId?: number,
+) {
+  const reply = (text: string, keyboard?: InlineKeyboard) =>
+    messageId ? editMessage(link.chatId, messageId, text, keyboard) : sendMessage(link.chatId, text, keyboard);
+
+  if (!p.debtId) {
+    const debts = await db.debt.findMany({ where: { userId: link.userId, closedAt: null }, orderBy: { createdAt: "asc" } });
+    return reply(
+      `💳 ชำระหนี้${p.amount ? ` <b>${formatMoney(p.amount)}</b>` : ""} — เลือกหนี้:`,
+      [
+        ...grid(
+          debts.map((d) => ({ text: `${d.icon} ${d.name}`, callback_data: `dp:${d.id}:${p.daysAgo}${encodeAmount(p.amount)}` })),
+          1,
+        ),
+        [{ text: "✖️ ยกเลิก", callback_data: "xc" }],
+      ],
+    );
+  }
+
+  const debt = await db.debt.findFirst({ where: { id: p.debtId, userId: link.userId } });
+  if (!debt) return reply("ไม่พบหนี้นี้");
+  const amount = p.amount ?? (debt.monthlyPayment == null ? null : Number(debt.monthlyPayment));
+  if (!amount) return reply(`ระบุจำนวนเงินด้วย เช่น <code>ผ่อน ${h(debt.name)} 2000</code>`);
+
+  const date = parseISODate(todayISO());
+  date.setUTCDate(date.getUTCDate() - p.daysAgo);
+  try {
+    const res = await payDebt(link.userId, {
+      debtId: debt.id,
+      amount,
+      accountId: debt.accountId ?? (await defaultAccountId(link)),
+      date: toISODate(date),
+      source: "TELEGRAM",
+    });
+    const d = res.debt;
+    const lines = [
+      `✅ ชำระ <b>${h(debt.name)} ${formatMoney(amount)}</b>`,
+      `จาก ${res.account.icon} ${h(res.account.name)} · 📅 ${formatDate(date)}`,
+      "",
+      d?.closed
+        ? "🎉 <b>ปิดหนี้เรียบร้อย!</b>"
+        : `คงเหลือ <b>${formatMoney(d?.balance ?? 0)}</b> (จ่ายแล้ว ${Math.round(d?.paidPct ?? 0)}%)${d?.monthsLeft ? ` · อีก ~${d.monthsLeft} งวด` : ""}`,
+    ];
+    return reply(lines.join("\n"), [[{ text: "↩️ ยกเลิกรายการนี้", callback_data: `u:${res.transactionId}` }]]);
+  } catch (err) {
+    if (err instanceof DebtError) return reply(err.message);
+    throw err;
+  }
+}
+
+function dueText(d: DebtView) {
+  switch (d.status) {
+    case "paid":
+      return "✓ จ่ายเดือนนี้แล้ว";
+    case "overdue":
+      return `⚠️ เลยกำหนด ${Math.abs(d.daysToDue ?? 0)} วัน`;
+    case "due-today":
+      return "● ครบกำหนดวันนี้";
+    case "due-soon":
+    case "upcoming":
+      return `ครบกำหนดอีก ${d.daysToDue} วัน`;
+    default:
+      return "";
+  }
+}
+
+async function sendDebts(link: Link) {
+  const [debts, cards] = await Promise.all([getDebts(link.userId), getCardDebts(link.userId)]);
+  if (!debts.length && !cards.length) return sendMessage(link.chatId, "ไม่มีหนี้ค้าง 🎉 — เพิ่มหนี้ที่ต้องติดตามได้ในเว็บ หน้า “หนี้สิน”");
+  const total = debts.reduce((s, d) => s + d.balance, 0) + cards.reduce((s, c) => s + c.owed, 0);
+  const lines = [`<b>💳 หนี้คงเหลือ ${formatMoney(total)}</b>`, ""];
+  for (const d of debts) {
+    lines.push(`${d.icon} <b>${h(d.name)}</b> ${formatMoney(d.balance)}`);
+    const meta = [d.monthly ? `งวด ${formatMoney(d.monthly, { decimals: false })}` : "", dueText(d)].filter(Boolean).join(" · ");
+    if (meta) lines.push(`   ${meta}`);
+  }
+  for (const c of cards) lines.push(`${c.icon} <b>${h(c.name)}</b> ค้าง ${formatMoney(c.owed)}`);
+  const unpaid = debts.filter((d) => d.monthly && d.status !== "paid");
+  const url = APP_URL();
+  const keyboard: InlineKeyboard = [
+    ...unpaid.slice(0, 6).map((d) => [{ text: `จ่าย ${d.name} ${formatMoney(d.monthly!, { decimals: false })}`, callback_data: `dq:${d.id}` }]),
+    ...(url ? [[{ text: "เปิดหน้าหนี้สิน", url: `${url}/debts` }]] : []),
+  ];
+  return sendMessage(link.chatId, lines.join("\n"), keyboard.length ? keyboard : undefined);
+}
+
+/** เตือนค่างวด: ก่อนครบกำหนด 2 วัน, วันครบกำหนด และเลยกำหนด 3 วัน (ถ้ายังไม่จ่าย) — คืนจำนวนข้อความที่ส่ง */
+export async function sendDebtReminders(link: Pick<Link, "userId" | "chatId">) {
+  const debts = await getDebts(link.userId);
+  const due = debts.filter(
+    (d) =>
+      d.status !== "paid" &&
+      d.daysToDue !== null &&
+      ((d.status === "due-soon" && d.daysToDue === 2) || d.status === "due-today" || (d.status === "overdue" && d.daysToDue === -3)),
+  );
+  for (const d of due) {
+    const when = d.status === "due-today" ? "ครบกำหนดวันนี้" : d.status === "overdue" ? `เลยกำหนดมา ${-d.daysToDue!} วันแล้ว` : `ครบกำหนดอีก ${d.daysToDue} วัน`;
+    await sendMessage(
+      link.chatId,
+      `⏰ <b>${d.icon} ${h(d.name)}</b> ${when}\n${d.monthly ? `ค่างวด ${formatMoney(d.monthly)} · ` : ""}คงเหลือ ${formatMoney(d.balance)}`,
+      d.monthly ? [[{ text: `✅ จ่ายแล้ว ${formatMoney(d.monthly, { decimals: false })}`, callback_data: `dq:${d.id}` }]] : undefined,
+    );
+  }
+  return due.length;
 }

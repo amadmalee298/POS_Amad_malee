@@ -8,6 +8,7 @@ import {
   ArrowLeftRight,
   BarChart3,
   CalendarCheck,
+  HandCoins,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -36,6 +37,7 @@ const NAV: NavItem[] = [
   { href: "/categories", label: "หมวดหมู่", icon: Tags },
   { href: "/budget", label: "งบประมาณ", icon: PiggyBank },
   { href: "/goals", label: "เป้าหมาย", icon: Target },
+  { href: "/debts", label: "หนี้สิน", icon: HandCoins },
   { href: "/reports", label: "รายงาน", icon: BarChart3 },
   { href: "/settings", label: "ตั้งค่า", icon: Settings },
 ];

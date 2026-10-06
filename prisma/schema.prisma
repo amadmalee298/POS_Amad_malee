@@ -28,6 +28,13 @@ enum TransactionType {
   TRANSFER
 }
 
+enum DebtKind {
+  INSTALLMENT /// ผ่อนสินค้า / รถ
+  LOAN /// สินเชื่อ / กู้ธนาคาร
+  PERSONAL /// ยืมคน
+  OTHER
+}
+
 enum TransactionSource {
   WEB
   TELEGRAM
@@ -51,6 +58,7 @@ model User {
   telegram       TelegramLink?
   telegramCodes  TelegramLinkCode[]
   monthCloses    MonthClose[]
+  debts          Debt[]
   invitesCreated InviteCode[]       @relation("InviteCreatedBy")
   inviteUsed     InviteCode?        @relation("InviteUsedBy")
 
@@ -75,6 +83,7 @@ model Account {
   telegramDefaults  TelegramLink[]
   goals             Goal[]
   monthCloses       MonthClose[]
+  debts             Debt[]
 
   @@index([userId])
   @@map("accounts")
@@ -113,6 +122,7 @@ model Transaction {
   note        String?
   source      TransactionSource @default(WEB)
   closeItem   MonthCloseItem?
+  debtPayment DebtPayment?
   createdAt   DateTime          @default(now()) @map("created_at")
   updatedAt   DateTime          @updatedAt @map("updated_at")
 
@@ -246,4 +256,51 @@ model MonthCloseItem {
 
   @@index([closeId])
   @@map("month_close_items")
+}
+
+/// หนี้ที่ต้องผ่อนชำระ (บัตรเครดิตใช้บัญชีประเภท CREDIT_CARD แทน)
+model Debt {
+  id             String    @id @default(cuid())
+  userId         String    @map("user_id")
+  name           String
+  icon           String    @default("🧾")
+  kind           DebtKind  @default(INSTALLMENT)
+  lender         String?
+  /// ยอดหนี้ตั้งต้น (ใช้คำนวณ % ที่จ่ายแล้ว)
+  principal      Decimal   @db.Decimal(14, 2)
+  /// ยอดคงเหลือ ณ วันที่เริ่มบันทึกในแอป — ยอดปัจจุบัน = ค่านี้ − เงินต้นที่ชำระผ่านแอป
+  startBalance   Decimal   @map("start_balance") @db.Decimal(14, 2)
+  monthlyPayment Decimal?  @map("monthly_payment") @db.Decimal(14, 2)
+  /// วันครบกำหนดชำระของทุกเดือน (1–31)
+  dueDay         Int?      @map("due_day")
+  interestRate   Decimal?  @map("interest_rate") @db.Decimal(6, 2)
+  /// บัญชีที่ใช้จ่ายเป็นประจำ
+  accountId      String?   @map("account_id")
+  note           String?
+  closedAt       DateTime? @map("closed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account  Account?      @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  payments DebtPayment[]
+
+  @@index([userId])
+  @@map("debts")
+}
+
+/// การชำระหนี้หนึ่งครั้ง — ผูกกับรายการรายจ่าย (ลบรายการ = ลบการชำระ)
+model DebtPayment {
+  id            String   @id @default(cuid())
+  debtId        String   @map("debt_id")
+  transactionId String   @unique @map("transaction_id")
+  /// ส่วนที่เป็นดอกเบี้ย/ค่าธรรมเนียม (ไม่ลดเงินต้น)
+  interest      Decimal  @default(0) @db.Decimal(14, 2)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  debt        Debt        @relation(fields: [debtId], references: [id], onDelete: Cascade)
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([debtId])
+  @@map("debt_payments")
 }

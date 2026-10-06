@@ -290,3 +290,66 @@ export function parseTransfer(input: string, ctx: { accounts: ParseAccount[] }):
   if (fromId && toId && fromId === toId) return { ok: false, reason: "same-account" };
   return { ok: true, transfer: { amount, fromId, toId, fromDefault, description, daysAgo } };
 }
+
+// ---------------------------------------------------------------------------
+// ชำระหนี้: "ผ่อน มอไซค์ 4500" / "จ่ายหนี้ กยศ" / "ชำระหนี้ 2000"
+// ---------------------------------------------------------------------------
+
+export type ParseDebt = { id: string; name: string; monthly: number | null };
+export type ParsedDebtPayment = { debtId: string | null; amount: number | null; daysAgo: number };
+
+const DEBT_PREFIX = /^(?:จ่ายหนี้|ชำระหนี้|ใช้หนี้|คืนเงินกู้|ผ่อนชำระ|จ่ายค่างวด|ค่างวด|ผ่อน|ชำระ)/i;
+
+/** ความยาวสตริงย่อยร่วมที่ยาวที่สุด (ใช้จับคู่ชื่อหนี้แบบหลวม ๆ เช่น "มอไซค์" ↔ "ผ่อนมอเตอร์ไซค์") */
+function commonRun(a: string, b: string) {
+  let best = 0;
+  for (let i = 0; i < a.length; i++)
+    for (let j = 0; j < b.length; j++) {
+      let k = 0;
+      while (i + k < a.length && j + k < b.length && a[i + k] === b[j + k]) k++;
+      if (k > best) best = k;
+    }
+  return best;
+}
+
+/** คืน null ถ้าไม่ใช่คำสั่งชำระหนี้ หรือผู้ใช้ไม่มีหนี้ที่ติดตามอยู่ */
+export function parseDebtPayment(input: string, ctx: { debts: ParseDebt[] }): ParsedDebtPayment | null {
+  if (!ctx.debts.length) return null;
+  let text = input.replace(/\s+/g, " ").trim();
+  let daysAgo = 0;
+  if (/เมื่อวานซืน/.test(text)) {
+    daysAgo = 2;
+    text = text.replace(/เมื่อวานซืน/g, " ");
+  } else if (/เมื่อวาน|yesterday/i.test(text)) {
+    daysAgo = 1;
+    text = text.replace(/เมื่อวาน|yesterday/gi, " ");
+  }
+  text = text.trim();
+  if (!DEBT_PREFIX.test(text)) return null;
+  text = text.replace(DEBT_PREFIX, " ");
+
+  const amounts = findAmounts(text);
+  const pick = amounts.find((a) => a.marked) ?? (amounts.length ? amounts.reduce((a, b) => (b.value > a.value ? b : a)) : null);
+  const amount = pick ? Math.round(pick.value * 100) / 100 : null;
+  if (pick) text = removeRange(text, pick.index, pick.length);
+  const rest = text.toLowerCase().replace(/\s+/g, "");
+
+  // จับคู่ชื่อ: ต้องมีส่วนร่วมกันอย่างน้อย 3 ตัวอักษร (ตัด "ผ่อน" ในชื่อหนี้ออกก่อน)
+  let debtId: string | null = null;
+  if (rest.length >= 2) {
+    let bestScore = 0;
+    for (const d of ctx.debts) {
+      const name = d.name.toLowerCase().replace(/\s+/g, "").replace(DEBT_PREFIX, "");
+      const score = commonRun(rest, name);
+      if (score > bestScore) {
+        bestScore = score;
+        debtId = d.id;
+      }
+    }
+    if (bestScore < Math.min(3, rest.length)) debtId = null;
+  }
+  // ไม่ได้ระบุชื่อ และมีหนี้เดียว → ใช้หนี้นั้น
+  if (!debtId && rest.length < 2 && ctx.debts.length === 1) debtId = ctx.debts[0].id;
+  if (amount !== null && !(amount > 0)) return null;
+  return { debtId, amount, daysAgo };
+}

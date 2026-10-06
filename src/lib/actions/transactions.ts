@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireUserId } from "@/lib/session";
+import { reopenIfOwing } from "@/lib/debts";
 import { parseISODate } from "@/lib/format";
 import { firstError, formToObject, transactionSchema, type ActionResult } from "@/lib/validation";
 
@@ -57,8 +58,10 @@ export async function saveTransactionAction(_prev: TxFormState, fd: FormData): P
 
 export async function deleteTransactionAction(id: string): Promise<ActionResult> {
   const userId = await requireUserId();
+  const payment = await db.debtPayment.findUnique({ where: { transactionId: id }, select: { debtId: true } });
   const { count } = await db.transaction.deleteMany({ where: { id, userId } });
   if (!count) return { ok: false, error: "ไม่พบรายการนี้" };
+  if (payment) await reopenIfOwing(userId, payment.debtId); // ลบการชำระหนี้ → หนี้ที่เคยปิดอาจกลับมาค้าง
   revalidatePath("/", "layout");
   return { ok: true, message: "ลบรายการแล้ว" };
 }

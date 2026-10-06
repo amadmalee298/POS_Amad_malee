@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseEntry, parseTransfer, type ParseAccount, type ParseCategory } from "./parse";
+import { parseDebtPayment, parseEntry, parseTransfer, type ParseAccount, type ParseCategory } from "./parse";
 
 const categories: ParseCategory[] = [
   ...["เงินเดือน", "รายได้ร้านครัวกะเพรา", "Freelance", "โบนัส", "รายได้อื่น ๆ"].map((name) => ({ id: `in:${name}`, name, type: "INCOME" as const })),
@@ -180,5 +180,41 @@ describe("parseTransfer", () => {
   it("uses yesterday", () => {
     assert.equal(t("เมื่อวาน โอน 100 kbank scb").daysAgo, 1);
     assert.equal(t("โอน 100 kbank scb เมื่อวาน").daysAgo, 1);
+  });
+});
+
+describe("parseDebtPayment", () => {
+  const debts = [
+    { id: "d:moto", name: "ผ่อนมอเตอร์ไซค์", monthly: 4500 },
+    { id: "d:kys", name: "กยศ.", monthly: 1200 },
+    { id: "d:iphone", name: "iPhone 16", monthly: 2100 },
+  ];
+  const p = (text: string, ds = debts) => parseDebtPayment(text, { debts: ds });
+
+  it("ignores ordinary messages and users without debts", () => {
+    assert.equal(p("ข้าว 50"), null);
+    assert.equal(p("โอน 100 kbank scb"), null);
+    assert.equal(parseDebtPayment("ผ่อน มอไซค์ 4500", { debts: [] }), null);
+  });
+
+  it("matches the debt loosely by name", () => {
+    assert.deepEqual(p("ผ่อน มอเตอร์ไซค์ 4500"), { debtId: "d:moto", amount: 4500, daysAgo: 0 });
+    assert.equal(p("ผ่อนมอไซค์ 4,500")?.debtId, "d:moto");
+    assert.equal(p("จ่ายหนี้ กยศ 1200")?.debtId, "d:kys");
+    assert.equal(p("ค่างวด iphone 2100")?.debtId, "d:iphone");
+  });
+
+  it("allows a missing amount (bot uses the monthly installment)", () => {
+    assert.deepEqual(p("จ่ายหนี้ กยศ"), { debtId: "d:kys", amount: null, daysAgo: 0 });
+  });
+
+  it("leaves the debt unresolved when the name is unknown or missing", () => {
+    assert.equal(p("ผ่อน ตู้เย็น 3000")?.debtId, null);
+    assert.equal(p("จ่ายหนี้ 2000")?.debtId, null);
+    assert.equal(p("จ่ายหนี้ 2000", [debts[0]])?.debtId, "d:moto"); // มีหนี้เดียว
+  });
+
+  it("supports yesterday", () => {
+    assert.equal(p("เมื่อวาน ผ่อน มอไซค์ 4500")?.daysAgo, 1);
   });
 });
