@@ -3,6 +3,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { NativeSelect } from "@/components/ui/native-select";
 import { FormDialog } from "@/components/form-dialog";
 import { EmojiField } from "@/components/emoji-field";
 import { adjustGoalAction, saveGoalAction } from "@/lib/actions/goals";
@@ -15,9 +16,20 @@ type Goal = {
   currentAmount: number;
   targetDate: string | null;
   note: string | null;
+  accountId: string | null;
 };
 
-export function GoalDialog({ goal, trigger }: { goal?: Goal; trigger: React.ReactNode }) {
+type AccountOption = { id: string; name: string; icon: string };
+
+export function GoalDialog({
+  goal,
+  accounts,
+  trigger,
+}: {
+  goal?: Goal;
+  accounts: AccountOption[];
+  trigger: React.ReactNode;
+}) {
   return (
     <FormDialog trigger={trigger} title={goal ? "แก้ไขเป้าหมาย" : "เป้าหมายใหม่"} action={saveGoalAction}>
       {goal && <input type="hidden" name="id" value={goal.id} />}
@@ -38,6 +50,18 @@ export function GoalDialog({ goal, trigger }: { goal?: Goal; trigger: React.Reac
       <div className="grid gap-1.5">
         <Label htmlFor="goal-date">วันที่ต้องการบรรลุ (ไม่บังคับ)</Label>
         <Input id="goal-date" name="targetDate" type="date" defaultValue={goal?.targetDate ?? ""} />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="goal-account">เก็บเงินไว้ที่บัญชี</Label>
+        <NativeSelect id="goal-account" name="accountId" defaultValue={goal?.accountId ?? ""}>
+          <option value="">— ไม่ระบุ —</option>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.icon} {a.name}
+            </option>
+          ))}
+        </NativeSelect>
+        <p className="text-xs text-muted-foreground">ตอนปิดยอดเดือน แอปจะสร้างรายการโอนเข้าบัญชีนี้ให้</p>
       </div>
       <EmojiField defaultValue={goal?.icon ?? "🎯"} />
       <div className="grid gap-1.5">

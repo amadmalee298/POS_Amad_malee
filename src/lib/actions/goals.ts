@@ -12,6 +12,8 @@ export async function saveGoalAction(fd: FormData): Promise<ActionResult> {
   if (!parsed.success) return { ok: false, error: firstError(parsed.error) };
   const id = (fd.get("id") as string) || null;
   const v = parsed.data;
+  if (v.accountId && !(await db.account.findFirst({ where: { id: v.accountId, userId } })))
+    return { ok: false, error: "ไม่พบบัญชีที่เลือก" };
   const data = {
     name: v.name,
     icon: v.icon,
@@ -19,6 +21,7 @@ export async function saveGoalAction(fd: FormData): Promise<ActionResult> {
     currentAmount: v.currentAmount,
     targetDate: v.targetDate ? parseISODate(v.targetDate) : null,
     note: v.note ?? null,
+    accountId: v.accountId ?? null,
   };
 
   if (id) {

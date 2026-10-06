@@ -7,6 +7,7 @@ import { useTheme } from "next-themes";
 import {
   ArrowLeftRight,
   BarChart3,
+  CalendarCheck,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -30,6 +31,7 @@ type NavItem = { href: string; label: string; icon: LucideIcon };
 const NAV: NavItem[] = [
   { href: "/dashboard", label: "แดชบอร์ด", icon: LayoutDashboard },
   { href: "/transactions", label: "รายการ", icon: ArrowLeftRight },
+  { href: "/monthly", label: "สรุปรายเดือน", icon: CalendarCheck },
   { href: "/accounts", label: "บัญชีเงิน", icon: Wallet },
   { href: "/categories", label: "หมวดหมู่", icon: Tags },
   { href: "/budget", label: "งบประมาณ", icon: PiggyBank },

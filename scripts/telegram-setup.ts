@@ -11,6 +11,7 @@ const COMMANDS = [
   { command: "balance", description: "ยอดเงินแต่ละบัญชี" },
   { command: "recent", description: "รายการล่าสุด" },
   { command: "transfer", description: "โอนเงินระหว่างบัญชี" },
+  { command: "close", description: "ปิดยอดเดือนที่แล้ว" },
   { command: "account", description: "ตั้งบัญชีเริ่มต้น" },
   { command: "undo", description: "ลบรายการล่าสุดที่บันทึกผ่านแชต" },
   { command: "help", description: "วิธีใช้" },

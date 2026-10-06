@@ -2,6 +2,8 @@ import "server-only";
 import { db } from "@/lib/db";
 import { getAccountsWithBalance, getCategoryBreakdown, getTotals, getTransactions } from "@/lib/queries";
 import { formatDate, formatMoney, monthLabel, monthRange, parseISODate, todayISO } from "@/lib/format";
+import { getPendingClose } from "@/lib/month-close";
+import { currentMonth, shiftMonth } from "@/lib/format";
 import { parseEntry, parseTransfer } from "./parse";
 import { answerCallback, editMessage, escapeHtml as h, sendMessage, type InlineKeyboard } from "./api";
 
@@ -16,7 +18,12 @@ export type TgUpdate = { update_id: number; message?: TgMessage; callback_query?
 
 type Link = { id: string; userId: string; chatId: string; defaultAccountId: string | null };
 
-const APP_URL = () => (process.env.APP_URL || process.env.AUTH_URL || "").replace(/\/$/, "");
+const APP_URL = () =>
+  (
+    process.env.APP_URL?.trim() ||
+    process.env.AUTH_URL ||
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "")
+  ).replace(/\/$/, "");
 
 const HELP = `<b>วิธีบันทึก</b> — พิมพ์รายการกับจำนวนเงิน เช่น
 • <code>ข้าวกะเพรา 50</code> → รายจ่าย หมวดอาหาร
@@ -41,6 +48,7 @@ const HELP = `<b>วิธีบันทึก</b> — พิมพ์ราย
 /balance ยอดเงินแต่ละบัญชี · /recent รายการล่าสุด
 /account ตั้งบัญชีเริ่มต้น · /undo ลบรายการล่าสุด
 /transfer วิธีโอนเงินระหว่างบัญชี
+/close ปิดยอดเดือนที่แล้ว
 /unlink ยกเลิกการเชื่อมต่อ`;
 
 const TRANSFER_HELP = `<b>โอนเงินระหว่างบัญชี</b>
@@ -97,6 +105,8 @@ export async function handleUpdate(update: TgUpdate) {
       return sendSummary(link, "month");
     case "balance":
       return sendBalance(link);
+    case "close":
+      return sendMonthCloseReminder(link, { always: true });
     case "recent":
       return sendRecent(link);
     case "account":
@@ -536,4 +546,35 @@ async function undoLast(link: Link) {
     link.chatId,
     `↩️ ลบ${txLabel(last.type)} ${formatMoney(Number(last.amount))}${last.description ? ` (${h(last.description)})` : ""} แล้ว`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// เตือนปิดยอดเดือน (คำสั่ง /close และ cron วันที่ 1)
+// ---------------------------------------------------------------------------
+
+/** ส่งสรุปเดือนที่แล้วพร้อมปุ่มไปหน้าปิดยอด — คืน true ถ้าส่งข้อความเตือน */
+export async function sendMonthCloseReminder(link: Pick<Link, "userId" | "chatId">, opts: { always?: boolean } = {}) {
+  const pending = await getPendingClose(link.userId);
+  if (!pending) {
+    if (opts.always)
+      await sendMessage(link.chatId, `✅ ${monthLabel(shiftMonth(currentMonth(), -1))} ปิดยอดแล้ว หรือไม่มีรายการ`);
+    return false;
+  }
+  const url = APP_URL();
+  const lines = [
+    `📅 <b>ปิดยอด${pending.label}</b>`,
+    `🔵 รายรับ ${formatMoney(pending.income)}`,
+    `🟠 รายจ่าย ${formatMoney(pending.expense)}`,
+    pending.net > 0 ? `💰 เหลือ <b>${formatMoney(pending.net)}</b>` : `⚠️ ใช้เกินรายรับ <b>${formatMoney(-pending.net)}</b>`,
+    "",
+    pending.net > 0
+      ? "แบ่งเงินที่เหลือเข้าเป้าหมาย แล้วแอปจะสร้างรายการโอนเข้าบัญชีเก็บเงินให้"
+      : "เปิดหน้าปิดยอดเพื่อตรวจและบันทึกว่าดูเดือนนี้แล้ว",
+  ];
+  await sendMessage(
+    link.chatId,
+    lines.join("\n"),
+    url ? [[{ text: pending.net > 0 ? "แบ่งเงินเลย" : "เปิดหน้าปิดยอด", url: `${url}/monthly/${pending.month}` }]] : undefined,
+  );
+  return true;
 }
