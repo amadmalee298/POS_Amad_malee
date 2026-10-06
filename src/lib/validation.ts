@@ -58,6 +58,7 @@ export const goalSchema = z.object({
   targetAmount: positiveMoney,
   currentAmount: anyMoney.refine((n) => n >= 0, "ต้องไม่ติดลบ").default(0),
   targetDate: isoDate.optional().or(z.literal("").transform(() => undefined)),
+  accountId: optionalText(64),
   note: optionalText(500),
 });
 

@@ -20,7 +20,11 @@ function monthsBetween(from: Date, to: Date) {
 
 export default async function GoalsPage() {
   const userId = await requireUserId();
-  const goals = await db.goal.findMany({ where: { userId }, orderBy: { createdAt: "asc" } });
+  const [goals, accountRows] = await Promise.all([
+    db.goal.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, include: { account: true } }),
+    db.account.findMany({ where: { userId, archived: false }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
+  ]);
+  const accounts = accountRows.map(({ id, name, icon }) => ({ id, name, icon }));
   const today = parseISODate(todayISO());
 
   const totalTarget = goals.reduce((a, g) => a + Number(g.targetAmount), 0);
@@ -37,6 +41,7 @@ export default async function GoalsPage() {
         }
         actions={
           <GoalDialog
+            accounts={accounts}
             trigger={
               <Button>
                 <Plus /> เป้าหมายใหม่
@@ -86,6 +91,7 @@ export default async function GoalsPage() {
                     </div>
                     <div className="flex">
                       <GoalDialog
+                        accounts={accounts}
                         goal={{
                           id: g.id,
                           name: g.name,
@@ -94,6 +100,7 @@ export default async function GoalsPage() {
                           currentAmount: current,
                           targetDate: g.targetDate ? toISODate(g.targetDate) : null,
                           note: g.note,
+                          accountId: g.accountId,
                         }}
                         trigger={
                           <Button variant="ghost" size="icon-sm" aria-label="แก้ไขเป้าหมาย">
@@ -144,7 +151,10 @@ export default async function GoalsPage() {
                       ต้องเก็บเดือนละ ≈ <Money value={perMonth} decimals={false} className="font-medium text-foreground" /> อีก {months} เดือน
                     </p>
                   )}
-                  {g.note && <p className="text-xs text-muted-foreground">{g.note}</p>}
+                  <p className="text-xs text-muted-foreground">
+                    {g.account ? <>เก็บเงินที่ {g.account.icon} {g.account.name}</> : "ยังไม่ได้ระบุบัญชีเก็บเงิน"}
+                    {g.note && <> · {g.note}</>}
+                  </p>
 
                   <div className="flex gap-2">
                     <GoalAdjustDialog

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, CalendarCheck } from "lucide-react";
 import { Card, CardAction, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -23,6 +23,7 @@ import {
 import { currentMonth, formatPercent, todayISO, isValidMonth, monthLabel, monthRange, shiftMonth } from "@/lib/format";
 import { dailyChartPoints } from "@/lib/chart-data";
 import { budgetTone } from "@/lib/budget";
+import { getPendingClose } from "@/lib/month-close";
 
 export const metadata: Metadata = { title: "แดชบอร์ด" };
 
@@ -33,7 +34,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
   const { start, end } = monthRange(month);
   const prev = monthRange(shiftMonth(month, -1));
 
-  const [totals, prevTotals, daily, categories, recent, accounts, goals, overallBudget] = await Promise.all([
+  const [totals, prevTotals, daily, categories, recent, accounts, goals, overallBudget, pendingClose] = await Promise.all([
     getTotals(userId, start, end),
     getTotals(userId, prev.start, prev.end),
     getDailySeries(userId, month),
@@ -42,6 +43,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
     getAccountsWithBalance(userId),
     db.goal.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, take: 3 }),
     db.budget.findFirst({ where: { userId, categoryId: null } }),
+    getPendingClose(userId),
   ]);
   const netWorth = accounts.reduce((a, x) => a + x.balance, 0);
   const budget = overallBudget ? Number(overallBudget.amount) : null;
@@ -49,6 +51,26 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
   return (
     <>
       <PageHeader title="Dashboard" description="เดือนนี้เงินเป็นอย่างไร" actions={<MonthPicker month={month} />} />
+
+      {pendingClose && (
+        <Link
+          href={`/monthly/${pendingClose.month}`}
+          className="mb-3 flex items-center gap-3 rounded-xl border border-primary/40 bg-primary/5 px-4 py-3 text-sm transition-colors hover:bg-primary/10"
+        >
+          <CalendarCheck className="size-5 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1">
+            <span className="font-medium">ปิดยอด{pendingClose.label}</span>
+            <span className="block text-muted-foreground">
+              {pendingClose.net > 0 ? (
+                <>เหลือ <Money value={pendingClose.net} decimals={false} /> — แบ่งเข้าเป้าหมายเลย</>
+              ) : (
+                "ตรวจสรุปเดือนที่แล้ว"
+              )}
+            </span>
+          </span>
+          <ArrowRight className="size-4 shrink-0 text-primary" />
+        </Link>
+      )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="รายรับ" dot="var(--income)" value={totals.income} previous={prevTotals.income} compareLabel="เดือนก่อน" />
