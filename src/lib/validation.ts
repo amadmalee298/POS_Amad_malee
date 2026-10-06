@@ -62,6 +62,27 @@ export const goalSchema = z.object({
   note: optionalText(500),
 });
 
+const optionalMoney = z
+  .union([z.literal(""), z.undefined()])
+  .transform(() => undefined)
+  .or(positiveMoney);
+
+export const debtSchema = z
+  .object({
+    name: z.string().trim().min(1, "กรุณากรอกชื่อหนี้").max(80),
+    icon: z.string().trim().min(1).max(16),
+    kind: z.enum(["INSTALLMENT", "LOAN", "PERSONAL", "OTHER"]),
+    lender: optionalText(80),
+    principal: positiveMoney,
+    startBalance: z.union([z.literal(""), z.undefined()]).transform(() => undefined).or(anyMoney.refine((n) => n >= 0, "ยอดคงเหลือต้องไม่ติดลบ")),
+    monthlyPayment: optionalMoney,
+    dueDay: z.union([z.literal(""), z.undefined()]).transform(() => undefined).or(z.coerce.number().int().min(1, "วันครบกำหนด 1–31").max(31, "วันครบกำหนด 1–31")),
+    interestRate: z.union([z.literal(""), z.undefined()]).transform(() => undefined).or(z.coerce.number().min(0).max(100)),
+    accountId: optionalText(64),
+    note: optionalText(500),
+  })
+  .refine((v) => v.startBalance === undefined || v.startBalance <= v.principal * 10, { message: "ยอดคงเหลือไม่สมเหตุสมผล", path: ["startBalance"] });
+
 export const registerSchema = z.object({
   name: z.string().trim().min(1, "กรุณากรอกชื่อ").max(60),
   email: z.string().trim().toLowerCase().email("อีเมลไม่ถูกต้อง"),

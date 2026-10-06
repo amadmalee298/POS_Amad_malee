@@ -35,7 +35,16 @@ export default async function NewTransactionPage({ searchParams }: PageProps<"/t
         <Card>
           <CardContent>
             <TransactionForm
-              initial={{ type, date: todayISO() }}
+              initial={{
+                type,
+                date: todayISO(),
+                toAccountId:
+                  type === "TRANSFER" && typeof sp.to === "string" && accounts.some((a) => a.id === sp.to) ? sp.to : undefined,
+                accountId:
+                  type === "TRANSFER" && typeof sp.to === "string"
+                    ? accounts.find((a) => a.id !== sp.to && a.type !== "CREDIT_CARD")?.id
+                    : undefined,
+              }}
               accounts={accounts}
               categories={categories}
               returnTo={safePath(sp.returnTo)}
