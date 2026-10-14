@@ -26,11 +26,11 @@ export type ParsedEntry = {
 
 export type ParseResult = { ok: true; entry: ParsedEntry } | { ok: false; reason: "no-amount" | "bad-amount" };
 
-const INCOME_PREFIX = /^(?:\+|รายรับ|รับเงิน|รับ|ได้เงิน|ได้รับ|income)\s*/i;
+const INCOME_PREFIX = /^(?:\+|รายรับ|รายได้|รับเงิน|รับ|ได้เงิน|ได้รับ|เงินเข้า|income)\s*/i;
 const EXPENSE_PREFIX = /^(?:-|−|รายจ่าย|จ่าย|ซื้อ|expense)\s*/i;
 
 /** คำที่บอกว่าเป็นรายรับแน่นอน แม้ไม่มีเครื่องหมาย + */
-const INCOME_HINTS = ["เงินเดือน", "salary", "โบนัส", "bonus", "ยอดขาย", "ขายได้", "ขายของ", "ค่าจ้าง", "ฟรีแลนซ์", "freelance", "ปันผล", "ดอกเบี้ยรับ"];
+const INCOME_HINTS = ["เงินเดือน", "salary", "โบนัส", "bonus", "ยอดขาย", "ขายได้", "ขายของ", "ค่าจ้าง", "ค่าแรง", "รายได้", "ได้ค่า", "ทิป", "ฟรีแลนซ์", "freelance", "ปันผล", "ดอกเบี้ยรับ"];
 
 /** คีย์เวิร์ด → ชื่อหมวดเริ่มต้น (ใช้เมื่อข้อความไม่มีชื่อหมวดตรง ๆ) — ลำดับมีผล ตรวจจากบนลงล่าง */
 const KEYWORDS: { type: "INCOME" | "EXPENSE"; category: string; words: string[] }[] = [

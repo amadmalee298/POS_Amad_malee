@@ -88,6 +88,24 @@ describe("parseEntry", () => {
     assert.equal(parse("+500 เพื่อนคืนเงิน").categoryId, "in:รายได้อื่น ๆ");
   });
 
+  it("treats รายได้ / ค่าแรง as income", () => {
+    const a = parse("รายได้500");
+    assert.equal(a.type, "INCOME");
+    assert.equal(a.amount, 500);
+    assert.equal(a.categoryId, "in:รายได้อื่น ๆ");
+    const b = parse("รายได้ค่าแรงร้านครัวกะเพรา 500");
+    assert.equal(b.type, "INCOME");
+    assert.equal(b.categoryId, "in:รายได้ร้านครัวกะเพรา");
+    assert.equal(parse("ค่าแรง 800").type, "INCOME");
+    assert.equal(parse("เงินเข้า 1200 kbank").type, "INCOME");
+    assert.equal(parse("รายได้ร้านครัวกะเพรา 3000").categoryId, "in:รายได้ร้านครัวกะเพรา");
+  });
+
+  it("paying wages with an explicit จ่าย stays an expense", () => {
+    assert.equal(parse("จ่ายค่าแรงช่าง 500").type, "EXPENSE");
+    assert.equal(parse("ข้าวกะเพรา 50").type, "EXPENSE");
+  });
+
   it("explicit minus forces an expense even with income words", () => {
     const e = parse("-200 ค่าจ้างช่าง");
     assert.equal(e.type, "EXPENSE");

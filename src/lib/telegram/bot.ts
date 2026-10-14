@@ -247,7 +247,7 @@ async function recordEntry(link: Link, text: string) {
       source: "TELEGRAM",
     },
   });
-  await sendMessage(link.chatId, await confirmationText(tx.id), txKeyboard(tx.id));
+  await sendMessage(link.chatId, await confirmationText(tx.id), txKeyboard(tx.id, tx.type));
 }
 
 async function confirmationText(txId: string, prefix = "✅ บันทึกแล้ว") {
@@ -268,8 +268,9 @@ async function confirmationText(txId: string, prefix = "✅ บันทึก�
   ].join("\n");
 }
 
-function txKeyboard(txId: string): InlineKeyboard {
+function txKeyboard(txId: string, type: string): InlineKeyboard {
   return [
+    [{ text: type === "INCOME" ? "⇄ เปลี่ยนเป็นรายจ่าย" : "⇄ เปลี่ยนเป็นรายรับ", callback_data: `t:${txId}` }],
     [
       { text: "🏷 เปลี่ยนหมวด", callback_data: `c:${txId}` },
       { text: "💳 เปลี่ยนบัญชี", callback_data: `b:${txId}` },
@@ -478,12 +479,31 @@ async function handleCallback(cb: TgCallback) {
         ]);
       return;
     }
+    case "t": {
+      // สลับรายรับ ↔ รายจ่าย แล้วเดาหมวดใหม่จากรายละเอียดเดิม
+      if (tx.type === "TRANSFER") return answerCallback(cb.id, "รายการโอนเปลี่ยนประเภทไม่ได้");
+      if (await db.debtPayment.findUnique({ where: { transactionId: tx.id }, select: { id: true } }))
+        return answerCallback(cb.id, "รายการชำระหนี้เปลี่ยนประเภทไม่ได้");
+      const newType = tx.type === "INCOME" ? "EXPENSE" : "INCOME";
+      const categories = await db.category.findMany({
+        where: { userId: link.userId },
+        select: { id: true, name: true, type: true },
+      });
+      const guess = parseEntry(`${newType === "INCOME" ? "+" : "-"}${Number(tx.amount)} ${tx.description}`, { categories, accounts: [] });
+      const categoryId = guess.ok ? guess.entry.categoryId : null;
+      if (!categoryId) return answerCallback(cb.id, `ยังไม่มีหมวด${newType === "INCOME" ? "รายรับ" : "รายจ่าย"}`);
+      await db.transaction.update({ where: { id: tx.id }, data: { type: newType, categoryId } });
+      await answerCallback(cb.id, newType === "INCOME" ? "เปลี่ยนเป็นรายรับแล้ว" : "เปลี่ยนเป็นรายจ่ายแล้ว");
+      if (messageId)
+        await editMessage(chatId, messageId, await confirmationText(tx.id, "✏️ แก้ไขแล้ว"), txKeyboard(tx.id, newType));
+      return;
+    }
     case "sc": {
       const cat = await db.category.findFirst({ where: { id: b, userId: link.userId } });
       if (!cat || cat.type !== tx.type) return answerCallback(cb.id, "หมวดไม่ถูกต้อง");
       await db.transaction.update({ where: { id: tx.id }, data: { categoryId: cat.id } });
       await answerCallback(cb.id, `เปลี่ยนเป็น ${cat.name}`);
-      if (messageId) await editMessage(chatId, messageId, await confirmationText(tx.id, "✏️ แก้ไขแล้ว"), txKeyboard(tx.id));
+      if (messageId) await editMessage(chatId, messageId, await confirmationText(tx.id, "✏️ แก้ไขแล้ว"), txKeyboard(tx.id, tx.type));
       return;
     }
     case "sa": {
@@ -491,12 +511,12 @@ async function handleCallback(cb: TgCallback) {
       if (!acc) return answerCallback(cb.id, "ไม่พบบัญชี");
       await db.transaction.update({ where: { id: tx.id }, data: { accountId: acc.id } });
       await answerCallback(cb.id, `เปลี่ยนเป็น ${acc.name}`);
-      if (messageId) await editMessage(chatId, messageId, await confirmationText(tx.id, "✏️ แก้ไขแล้ว"), txKeyboard(tx.id));
+      if (messageId) await editMessage(chatId, messageId, await confirmationText(tx.id, "✏️ แก้ไขแล้ว"), txKeyboard(tx.id, tx.type));
       return;
     }
     case "v": {
       await answerCallback(cb.id);
-      if (messageId) await editMessage(chatId, messageId, await confirmationText(tx.id), txKeyboard(tx.id));
+      if (messageId) await editMessage(chatId, messageId, await confirmationText(tx.id), txKeyboard(tx.id, tx.type));
       return;
     }
     default:
