@@ -64,6 +64,23 @@ const FALLBACK = { INCOME: ["รายได้อื่น ๆ", "รายไ�
 
 const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
 
+/** รูปแบบชื่อบัญชีที่ยอมรับ: ชื่อเต็ม และชื่อที่ตัดเครื่องหมาย/สัญลักษณ์ออก (เช่น "Dime!" → "dime") */
+function nameVariants(name: string) {
+  const full = name.trim().toLowerCase();
+  const bare = full.replace(/[^\p{L}\p{N}\p{M}]+/gu, "");
+  return [...new Set([full, bare])].filter((v) => v.length >= 2).sort((a, b) => b.length - a.length);
+}
+
+/** หาชื่อบัญชีในข้อความ — คืนตำแหน่งและความยาวของคำที่จับได้ */
+function findAccountIn(text: string, name: string) {
+  const lower = text.toLowerCase();
+  for (const v of nameVariants(name)) {
+    const index = lower.indexOf(v);
+    if (index >= 0) return { index, length: v.length };
+  }
+  return null;
+}
+
 // จำนวนเงิน: 1,250.50 / 1250 / 1.2k / 3พัน — พร้อมเครื่องหมายนำหน้า/หน่วยต่อท้าย (ถ้ามี)
 const AMOUNT_RE = /([+\-−฿]?)\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?\s*(k|พัน|หมื่น|บาท|บ\.|฿)?(?![\d])/gi;
 
@@ -84,11 +101,6 @@ function findAmounts(text: string): AmountToken[] {
 
 function removeRange(s: string, index: number, length: number) {
   return s.slice(0, index) + " " + s.slice(index + length);
-}
-
-function stripWord(s: string, word: string) {
-  const i = s.toLowerCase().indexOf(word.toLowerCase());
-  return i < 0 ? s : removeRange(s, i, word.length);
 }
 
 export function parseEntry(
@@ -119,13 +131,13 @@ export function parseEntry(
 
   // บัญชี: ชื่อบัญชีที่ปรากฏในข้อความ (ยาวสุดก่อน) — ตรวจก่อนหาจำนวนเงิน เผื่อชื่อบัญชีมีตัวเลข
   let accountId: string | null = null;
-  const lower = text.toLowerCase();
-  const acc = [...ctx.accounts]
+  const accHit = [...ctx.accounts]
     .sort((a, b) => b.name.length - a.name.length)
-    .find((a) => a.name.trim() && lower.includes(a.name.toLowerCase()));
-  if (acc) {
-    accountId = acc.id;
-    text = stripWord(text, acc.name).replace(/(?:^|\s)(?:@|จาก|ด้วย|ผ่าน|เข้า)(?=\s|$)/g, " ");
+    .map((a) => ({ a, hit: findAccountIn(text, a.name) }))
+    .find((x) => x.hit);
+  if (accHit) {
+    accountId = accHit.a.id;
+    text = removeRange(text, accHit.hit!.index, accHit.hit!.length).replace(/(?:^|\s)(?:@|จาก|ด้วย|ผ่าน|เข้า)(?=\s|$)/g, " ");
   }
   text = text.replace(/7-11|7-eleven/gi, (m) => m.replace(/\d/g, (d) => "\u0000" + d)); // กันไม่ให้ 7-11 ถูกอ่านเป็นจำนวนเงิน
 
@@ -230,13 +242,14 @@ export function parseTransfer(input: string, ctx: { accounts: ParseAccount[] }):
   const mentions: Mention[] = [];
   let scan = text;
   for (const acc of [...ctx.accounts].filter((a) => a.name.trim()).sort((a, b) => b.name.length - a.name.length)) {
-    const i = scan.toLowerCase().indexOf(acc.name.toLowerCase());
-    if (i < 0) continue;
+    const hit = findAccountIn(scan, acc.name);
+    if (!hit) continue;
+    const i = hit.index;
     const before = text.slice(0, i);
     const role = TO_WORD.test(before) ? "to" : FROM_WORD.test(before) ? "from" : null;
     mentions.push({ id: acc.id, type: acc.type, index: i, role });
-    scan = scan.slice(0, i) + "\u0000".repeat(acc.name.length) + scan.slice(i + acc.name.length);
-    if (scan.toLowerCase().includes(acc.name.toLowerCase())) return { ok: false, reason: "same-account" };
+    scan = scan.slice(0, i) + "\u0000".repeat(hit.length) + scan.slice(i + hit.length);
+    if (findAccountIn(scan, acc.name)) return { ok: false, reason: "same-account" };
   }
   mentions.sort((a, b) => a.index - b.index);
   // "โอนค่าเช่า 6000" / "โอนให้แม่ 2000" = จ่ายเงินออกไป ไม่ใช่ย้ายระหว่างบัญชีตัวเอง → ให้ parseEntry จัดการเป็นรายจ่าย
@@ -265,11 +278,15 @@ export function parseTransfer(input: string, ctx: { accounts: ParseAccount[] }):
   if (kind === "transfer") {
     fromId = explicitFrom?.id ?? null;
     toId = explicitTo?.id ?? null;
-    for (const m of rest) {
-      if (!fromId) fromId = m.id;
-      else if (!toId) toId = m.id;
+    if (!fromId && !toId && rest.length === 1) {
+      // "โอน 500 truemoney" (บัญชีเดียว ไม่มีคำบอกทิศ) → ถือเป็นปลายทาง แล้วให้เลือกต้นทาง
+      toId = rest[0].id;
+    } else {
+      for (const m of rest) {
+        if (!fromId) fromId = m.id;
+        else if (!toId) toId = m.id;
+      }
     }
-    // "โอน 500 truemoney" (บัญชีเดียว ไม่มีคำบอกทิศ) → ถือเป็นต้นทาง แล้วให้เลือกปลายทาง
   } else if (kind === "withdraw") {
     if (!cash) return { ok: false, reason: "no-cash-account" };
     toId = cash.id;

@@ -6,7 +6,7 @@ const categories: ParseCategory[] = [
   ...["เงินเดือน", "รายได้ร้านครัวกะเพรา", "Freelance", "โบนัส", "รายได้อื่น ๆ"].map((name) => ({ id: `in:${name}`, name, type: "INCOME" as const })),
   ...["อาหาร", "เดินทาง", "บ้าน", "ช้อปปิ้ง", "ค่าน้ำ/ไฟ", "โทรศัพท์", "หนี้สิน", "ธุรกิจ", "อื่น ๆ"].map((name) => ({ id: `ex:${name}`, name, type: "EXPENSE" as const })),
 ];
-const ACCOUNT_TYPES: Record<string, string> = { เงินสด: "CASH", KBank: "BANK", SCB: "BANK", บัตรเครดิต: "CREDIT_CARD", TrueMoney: "EWALLET" };
+const ACCOUNT_TYPES: Record<string, string> = { เงินสด: "CASH", KBank: "BANK", SCB: "BANK", บัตรเครดิต: "CREDIT_CARD", TrueMoney: "EWALLET", "Dime!": "BANK", เป๋าตัง: "EWALLET" };
 const accounts: ParseAccount[] = Object.entries(ACCOUNT_TYPES).map(([name, type]) => ({ id: `acc:${name}`, name, type }));
 const ctx = { categories, accounts };
 
@@ -57,6 +57,11 @@ describe("parseEntry", () => {
     assert.equal(parse("grab 1.2k").amount, 1200);
     assert.equal(parse("ค่าเช่า 6พัน").amount, 6000);
     assert.equal(parse("ค่าเช่า 6พัน").categoryId, "ex:บ้าน");
+  });
+
+  it("matches accounts ignoring punctuation in their names", () => {
+    assert.equal(parse("ข้าว 50 dime").accountId, "acc:Dime!");
+    assert.equal(parse("ข้าว 50 dime").description, "ข้าว");
   });
 
   it("picks the account named in the message", () => {
@@ -193,6 +198,27 @@ describe("parseTransfer", () => {
     assert.equal(parseTransfer("โอนให้แม่ 2000", { accounts }), null);
     assert.equal(parseEntry("โอนค่าเช่า 6000", ctx).ok && (parseEntry("โอนค่าเช่า 6000", ctx) as { entry: { categoryId: string } }).entry.categoryId, "ex:บ้าน");
     assert.ok(parseTransfer("โอนให้ scb 500 จาก kbank", { accounts })?.ok);
+  });
+
+  it("matches account names that contain punctuation (Dime!)", () => {
+    const x = t("โอน 338 truemoney-จากDime");
+    assert.equal(x.amount, 338);
+    assert.equal(x.fromId, "acc:Dime!");
+    assert.equal(x.toId, "acc:TrueMoney");
+    const y = t("โอน338truemoneyจาก dime");
+    assert.equal(y.fromId, "acc:Dime!");
+    assert.equal(y.toId, "acc:TrueMoney");
+    assert.equal(t("โอน 200 เป๋าตัง ไป dime").toId, "acc:Dime!");
+  });
+
+  it("a single account without direction words is the destination", () => {
+    const x = t("โอน338 dime");
+    assert.equal(x.toId, "acc:Dime!");
+    assert.equal(x.fromId, null);
+    const y = t("โอน338truemoney");
+    assert.equal(y.toId, "acc:TrueMoney");
+    assert.equal(y.fromId, null);
+    assert.equal(t("โอน 500 จาก kbank").fromId, "acc:KBank");
   });
 
   it("uses yesterday", () => {
