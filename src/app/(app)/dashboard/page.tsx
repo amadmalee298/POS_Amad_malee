@@ -24,6 +24,8 @@ import { currentMonth, formatPercent, todayISO, isValidMonth, monthLabel, monthR
 import { dailyChartPoints } from "@/lib/chart-data";
 import { budgetTone } from "@/lib/budget";
 import { getPendingClose } from "@/lib/month-close";
+import { QuickAddTrigger } from "@/components/quick-add-sheet";
+import { parseISODate } from "@/lib/format";
 
 export const metadata: Metadata = { title: "แดชบอร์ด" };
 
@@ -34,7 +36,8 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
   const { start, end } = monthRange(month);
   const prev = monthRange(shiftMonth(month, -1));
 
-  const [totals, prevTotals, daily, categories, recent, accounts, goals, overallBudget, pendingClose] = await Promise.all([
+  const today = todayISO();
+  const [totals, prevTotals, daily, categories, recent, accounts, goals, overallBudget, pendingClose, todayExpenses] = await Promise.all([
     getTotals(userId, start, end),
     getTotals(userId, prev.start, prev.end),
     getDailySeries(userId, month),
@@ -44,6 +47,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
     db.goal.findMany({ where: { userId }, orderBy: { createdAt: "asc" }, take: 3 }),
     db.budget.findFirst({ where: { userId, categoryId: null } }),
     getPendingClose(userId),
+    db.transaction.count({ where: { userId, type: "EXPENSE", date: parseISODate(today) } }),
   ]);
   const netWorth = accounts.reduce((a, x) => a + x.balance, 0);
   const budget = overallBudget ? Number(overallBudget.amount) : null;
@@ -51,6 +55,21 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
   return (
     <>
       <PageHeader title="Dashboard" description="เดือนนี้เงินเป็นอย่างไร" actions={<MonthPicker month={month} />} />
+
+      {todayExpenses === 0 && month === today.slice(0, 7) && (
+        <Card className="mb-3 gap-2 border-primary/30 bg-primary/5 py-4">
+          <CardContent className="flex items-center gap-3 px-4">
+            <span className="text-2xl" aria-hidden>
+              ⭐
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs text-muted-foreground">สิ่งที่อยากชวนทำวันนี้</div>
+              <div className="font-medium">บันทึกรายจ่ายวันนี้</div>
+            </div>
+            <QuickAddTrigger size="sm">บันทึก</QuickAddTrigger>
+          </CardContent>
+        </Card>
+      )}
 
       {pendingClose && (
         <Link

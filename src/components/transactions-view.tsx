@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/page-header";
 import { MonthPicker } from "@/components/month-picker";
+import { QuickAddTrigger } from "@/components/quick-add-sheet";
 import { TransactionFilters } from "@/components/transaction-filters";
 import { TransactionList } from "@/components/transaction-list";
 import { Money } from "@/components/money";
@@ -60,11 +60,9 @@ export async function TransactionsView({
         actions={
           <>
             <MonthPicker month={month} />
-            <Button asChild className="hidden md:inline-flex">
-              <Link href={`/transactions/new?type=${newType}`}>
-                <Plus /> เพิ่ม{kind === "income" ? "รายรับ" : "รายการ"}
-              </Link>
-            </Button>
+            <QuickAddTrigger entryType={newType} className="hidden md:inline-flex">
+              <Plus /> เพิ่ม{kind === "income" ? "รายรับ" : "รายการ"}
+            </QuickAddTrigger>
           </>
         }
       />

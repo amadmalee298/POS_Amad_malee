@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { logoutAction } from "@/lib/actions/auth";
+import { openQuickAdd } from "@/components/quick-add-sheet";
 
 type NavItem = { href: string; label: string; icon: LucideIcon };
 
@@ -73,10 +74,8 @@ export function Sidebar({ user }: { user: { name: string; email: string } }) {
         <span className="grid size-8 place-items-center rounded-lg bg-primary text-base text-primary-foreground">฿</span>
         <span className="font-semibold">บัญชีส่วนตัว</span>
       </Link>
-      <Button asChild className="mb-4 w-full" size="lg">
-        <Link href="/transactions/new">
-          <Plus /> เพิ่มรายการ
-        </Link>
+      <Button className="mb-4 w-full" size="lg" onClick={() => openQuickAdd()}>
+        <Plus /> เพิ่มรายการ
       </Button>
       <nav className="flex flex-1 flex-col gap-0.5">
         {NAV.map(({ href, label, icon: Icon }) => (
@@ -149,13 +148,14 @@ export function BottomNav() {
         {tab("/dashboard", "หน้าหลัก", LayoutDashboard)}
         {tab("/transactions", "รายการ", ArrowLeftRight)}
         <div className="flex flex-1 justify-center">
-          <Link
-            href="/transactions/new"
+          <button
+            type="button"
+            onClick={() => openQuickAdd()}
             aria-label="เพิ่มรายการ"
             className="-mt-5 grid size-14 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg ring-4 ring-background"
           >
             <Plus className="size-6" />
-          </Link>
+          </button>
         </div>
         {tab("/reports", "รายงาน", BarChart3)}
         <Sheet open={open} onOpenChange={setOpen}>

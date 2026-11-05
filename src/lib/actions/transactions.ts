@@ -15,8 +15,8 @@ function safeReturnTo(v: FormDataEntryValue | null) {
   return s.startsWith("/") && !s.startsWith("//") ? s : "/transactions";
 }
 
-export async function saveTransactionAction(_prev: TxFormState, fd: FormData): Promise<TxFormState> {
-  const userId = await requireUserId();
+/** ตรวจและบันทึกรายการ (ใช้ร่วมกันระหว่างฟอร์มเต็มหน้าและฟอร์มด่วน) */
+async function persistTransaction(userId: string, fd: FormData): Promise<{ error: string } | { id: string }> {
   const parsed = transactionSchema.safeParse(formToObject(fd));
   if (!parsed.success) return { error: firstError(parsed.error) };
   const v = parsed.data;
@@ -48,12 +48,30 @@ export async function saveTransactionAction(_prev: TxFormState, fd: FormData): P
   if (id) {
     const { count } = await db.transaction.updateMany({ where: { id, userId }, data });
     if (!count) return { error: "ไม่พบรายการนี้" };
-  } else {
-    await db.transaction.create({ data: { ...data, userId } });
+    return { id };
   }
+  const created = await db.transaction.create({ data: { ...data, userId } });
+  return { id: created.id };
+}
 
+export async function saveTransactionAction(_prev: TxFormState, fd: FormData): Promise<TxFormState> {
+  const userId = await requireUserId();
+  const res = await persistTransaction(userId, fd);
+  if ("error" in res) return { error: res.error };
   revalidatePath("/", "layout");
   redirect(safeReturnTo(fd.get("returnTo")));
+}
+
+export type QuickAddResult = { ok: true; id: string } | { ok: false; error: string };
+
+/** ฟอร์มบันทึกด่วน: บันทึกแล้วคืน id (ไม่ redirect) เพื่อแสดงหน้าจอ “บันทึกแล้ว” และให้ยกเลิกได้ */
+export async function quickAddTransactionAction(fd: FormData): Promise<QuickAddResult> {
+  const userId = await requireUserId();
+  if (fd.get("id")) return { ok: false, error: "ใช้ฟอร์มนี้แก้ไขรายการไม่ได้" };
+  const res = await persistTransaction(userId, fd);
+  if ("error" in res) return { ok: false, error: res.error };
+  revalidatePath("/", "layout");
+  return { ok: true, id: res.id };
 }
 
 export async function deleteTransactionAction(id: string): Promise<ActionResult> {
